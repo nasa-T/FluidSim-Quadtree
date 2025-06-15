@@ -648,6 +648,8 @@ class FluidGrid {
 
         void refineCell(int depth, int index) {
             uint64_t id = getID(depth, index);
+            printID(id);
+            std::cout << std::endl;
             assert(idToCell.count(id)); // Can only refine leaf nodes
             FluidCell *cell = idToCell[id];
             cell->refine();
@@ -926,6 +928,7 @@ class FluidGrid {
             FluidCell *cellL = cell->getLeft();
             FluidCell *cellT = cell->getTop();
             FluidCell *cellB = cell->getBottom();
+            cellR->absorbChildProps(); cellL->absorbChildProps(); cellT->absorbChildProps(); cellB->absorbChildProps();
             long double mass = cell->getMass();
             long double massR = cellR->getMass();
             long double massL = cellL->getMass();
@@ -973,18 +976,32 @@ class FluidGrid {
                         realNeighbs.push_back(neighbors[i]);
                     }
                 }
+                TreeLoc loc = getLocFromID(getIDfromLeaf(cell));
                 for (int i = 0; i < realNeighbs.size(); i++) {
                     island = island & realNeighbs[i]->hasChildren();
+                    if (cell->shouldRefine) {
+                        if (!realNeighbs[i]->shouldRefine && !realNeighbs[i]->hasChildren()) {
+                            TreeLoc locNeighb = getLocFromID(getIDfromLeaf(realNeighbs[i]));
+                            // if ((int)locNeighb.depth - (int)loc.depth)
+                        }
+                    }
                 }
                 if (island) {
                     cell->shouldRefine = true;
                     cell->shouldCoarsen = false;
-                } else if (mass < 0.05*maxMass) {
-                    printID(getIDfromLeaf(cell));
-                    std::cout << std::endl;
+                } else if (mass < 0.01*maxMass) {
+                    // printID(getIDfromLeaf(cell));
+                    // std::cout << std::endl;
+                    // std::cout << "no mass\n";
                     cell->shouldRefine = false;
                     cell->shouldCoarsen = true;
                 }
+                if (cell->shouldCoarsen) {
+                    if (cellR->shouldRefine | cellL->shouldRefine | cellT->shouldRefine | cellB->shouldRefine) {
+                        cell->shouldCoarsen = false;
+                    }
+                }
+
         }
 
         void checkAMR() {
@@ -1018,15 +1035,15 @@ class FluidGrid {
                         }
                         
                         bool resJump = ((int)(loc.depth-locT.depth) | (int)(loc.depth-locB.depth) | (int)(loc.depth-locL.depth) | (int)(loc.depth-locR.depth)) > 0;
-                        if (!(locT.depth | locB.depth | locL.depth | locR.depth)) resJump = false;
+                        // if (!(locT.depth | locB.depth | locL.depth | locR.depth)) resJump = false;
                         if (resJump) {
-                            printID(pair.first);
-                            std::cout << std::endl;
+                            // printID(pair.first);
+                            // std::cout << std::endl;
                         }
                         
-                        if (pair.first == 0x30000003e) {
-                            std::cout << "hi\n";
-                        }
+                        // if (pair.first == 0x30000003e) {
+                        //     std::cout << "hi\n";
+                        // }
                         if (!resJump) refineCell(loc.depth, loc.index);
                     }
                 } else if (pair.second->shouldCoarsen) {
@@ -1035,34 +1052,45 @@ class FluidGrid {
                     if (id != 0) {
                         TreeLoc loc = getLocFromID(id);
                         
-                        pair.second->shouldCoarsen = false;
-                        
                         if (loc.depth > minDepth) {
                             // if (pair.first == 0x30000003e) {
-                            //     std::cout << "to coarsen\n";
+                                // std::cout << "to coarsen\n";
                             // }
+                            // printID(id);
+                            // std::cout << std::endl;
                             FluidCell *parent = pair.second->parent;
                             FluidCell *siblings[4] = {parent->nw, parent->ne, parent->sw, parent->se};
                             bool agreement = true;
                             for (int i = 0; i < 4; i++) {
                                 agreement = siblings[i]->shouldCoarsen & agreement;
-                                printID(id);
-                                std::cout << std::endl;
-                                std::cout << "agreement: " << siblings[i]->shouldCoarsen << std::endl;
+                                // printID(id);
+                                // std::cout << std::endl;
+                                // std::cout << "agreement: " << siblings[i]->shouldCoarsen << std::endl;
                                 siblings[i]->shouldCoarsen = false;
                             }
                             
                             if (agreement) {
                                 Direction dirs[4] = {DOWN, LEFT, UP, RIGHT};
                                 bool resJump = false;
+                                FluidCell *adjCell;
                                 for (int i = 0; i < 4; i++) {
-                                    resJump = resJump | adjacentCell(loc.depth-1,loc.index >> 2,dirs[i])->hasChildren();
+                                    // std::cout << "agreed " << dirs[i] << std::endl;
+                                    // std::cout << adjacentCell(loc.depth-1,loc.index >> 2,dirs[i]) << std::endl;
+                                    adjCell = adjacentCell(loc.depth-1,loc.index >> 2,dirs[i]);
+                                    
+                                    if (adjCell != 0) {
+                                        resJump = resJump | adjCell->hasChildren();
+                                    }
+                                    // resJump = resJump | adjacentCell(loc.depth-1,loc.index >> 2,dirs[i])->hasChildren();
                                 }
+                                // printID(id);
+                                // std::cout << std::endl;
                                 // bool resJump = (pair.second->getTop()->hasChildren()) || (pair.second->getBottom()->hasChildren()) || (pair.second->getLeft()->hasChildren()) || (pair.second->getRight()->hasChildren());
                                 if (!resJump) coarsenCell(loc.depth-1, loc.index >> 2);
                             }
                         }
                     }
+                    pair.second->shouldCoarsen = false;
                 }
             }
         }
@@ -1084,7 +1112,7 @@ class FluidGrid {
         
 
     private:
-        int maxDepth = 4;
+        int maxDepth = 5;
         int minDepth = 2;
         double width, height;
         double maxV;
@@ -1148,7 +1176,7 @@ class Simulator {
 
             drawCells();
             // SDL_Delay(grid->getdt()*1000);  // setting some Delay
-            SDL_Delay(16);
+            SDL_Delay(1000);
         }
 
         void saveSim() {
@@ -1217,7 +1245,10 @@ int main(int argv, char **argc) {
     SDL_PollEvent(&event);
     while(!(event.type == SDL_QUIT)){
         SDL_PollEvent(&event);
-        sim.step();
+        sim.drawCells();
+        if (event.key.state == SDLK_SPACE) {
+            sim.step();
+        }
         
     }
     // for (const auto& pair : sim.grid->getIDMap()) {
