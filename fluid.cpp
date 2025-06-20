@@ -326,9 +326,13 @@ class FluidCell {
             if (hasChildren()) return;
 
             nw = new FluidCell(this, mass/4, width/2, height/2, temperature, hydrogen, helium, metals);
+            nw->setGravPotential(gravPotential);
             ne = new FluidCell(this, mass/4, width/2, height/2, temperature, hydrogen, helium, metals);
+            ne->setGravPotential(gravPotential);
             sw = new FluidCell(this, mass/4, width/2, height/2, temperature, hydrogen, helium, metals);
+            sw->setGravPotential(gravPotential);
             se = new FluidCell(this, mass/4, width/2, height/2, temperature, hydrogen, helium, metals);
+            se->setGravPotential(gravPotential);
 
         }
 
@@ -858,10 +862,10 @@ class FluidGrid {
                 long double massFluxL = 0;
                 long double massFluxT = 0;
                 long double massFluxB = 0;
-                double vxFluxR = 0;
-                double vxFluxL = 0;
-                double vyFluxT = 0;
-                double vyFluxB = 0;
+                long double vxFluxR = 0;
+                long double vxFluxL = 0;
+                long double vyFluxT = 0;
+                long double vyFluxB = 0;
                 double vxR = 0;
                 double vxL = 0;
                 double vyT = 0;
@@ -876,97 +880,114 @@ class FluidGrid {
                 // not a boundary
                 if (cellR != cell) {
                     if (cellR->hasChildren()) {
-                        vxR = 0;
-                        massR = 0;
+                        // vxR = 0;
+                        // massR = 0;
                         FluidCell *children[2] = {cellR->nw, cellR->sw};
                         for (int i = 0; i < 2; i++) {
-                            vxR += children[i]->getVelocity().getVx();
-                            massR += children[i]->getMass();
+                            vxR = (children[i]->getVelocity().getVx() + vC.getVx())/2;
+                            massR = children[i]->getMass();
+                            massFluxR += vxR > 0 ? mass*vxR*getdt()*children[i]->getHeight()/cell->getSize() : massR*vxR*getdt()*children[i]->getHeight()/children[i]->getSize();
+                            vxFluxR += vxR > 0 ? mass*cell->getVelocity().getVx()*vxR*getdt()*children[i]->getHeight()/cell->getSize() : massR*children[i]->getVelocity().getVx()*vxR*getdt()*children[i]->getHeight()/children[i]->getSize();
                         }
-                        massR /= 2;
-                        vxR = (vxR/2 + vC.getVx())/2;
+                        // massR /= 2;
+                        // vxR = (vxR/2 + vC.getVx())/2;
                         
                     } else {
                         // 2 times mass so that we take same amount of mass as 
                         //// having size/2 in flux calc
                         massR = cellR->getMass();
+                        massFluxR = vxR > 0 ? cell->getMass()*vxR*getdt()*cell->getHeight()/cell->getSize() : massR*vxR*getdt()*cell->getHeight()/cellR->getSize();
+                        vxFluxR = vxR > 0 ? mass*cell->getVelocity().getVx()*vxR*getdt()*cell->getHeight()/cell->getSize() : massR*cellR->getVelocity().getVx()*vxR*getdt()*cell->getHeight()/cellR->getSize();
                     }
-                    massFluxR = vxR > 0 ? cell->getMass()*vxR*getdt()*cell->getHeight()/cell->getSize() : massR*vxR*getdt()*cell->getHeight()/cellR->getSize();
-                    vxFluxR = vxR > 0 ? mass*cell->getVelocity().getVx()*vxR*getdt()*cell->getHeight()/cell->getSize() : massR*cellR->getVelocity().getVx()*vxR*getdt()*cell->getHeight()/cellR->getSize();
+                    // massFluxR = vxR > 0 ? cell->getMass()*vxR*getdt()*cell->getHeight()/cell->getSize() : massR*vxR*getdt()*cell->getHeight()/cellR->getSize();
+                    // momentum
+                    // vxFluxR = vxR > 0 ? mass*cell->getVelocity().getVx()*vxR*getdt()*cell->getHeight()/cell->getSize() : massR*cellR->getVelocity().getVx()*vxR*getdt()*cell->getHeight()/cellR->getSize();
                 }
                 // not a boundary
                 if (cellL != cell) {
                     if (cellL->hasChildren()) {
-                        vxL = 0;
-                        massL = 0;
+                        // vxL = 0;
+                        // massL = 0;
                         FluidCell *children[2] = {cellL->ne, cellL->se};
                         for (int i = 0; i < 2; i++) {
-                            vxL += children[i]->getVelocity().getVx();
-                            massL += children[i]->getMass();
+                            vxL = (children[i]->getVelocity().getVx() + vC.getVx())/2;
+                            massL = children[i]->getMass();
+                            massFluxL += vxL < 0 ? mass*vxL*getdt()*children[i]->getHeight()/cell->getSize() : massL*vxL*getdt()*children[i]->getHeight()/children[i]->getSize();
+                            vxFluxL += vxL < 0 ? mass*cell->getVelocity().getVx()*vxL*getdt()*children[i]->getHeight()/cell->getSize() : massL*children[i]->getVelocity().getVx()*vxL*getdt()*children[i]->getHeight()/children[i]->getSize();
                         }
-                        massL /= 2;
-                        vxL = (vxL/2 + vC.getVx())/2;
+                        // massL /= 2;
+                        // vxL = (vxL/2 + vC.getVx())/2;
                         
                     } else {
                         // 2 times mass so that we take same amount of mass as 
                         //// having size/2 in flux calc
                         massL = cellL->getMass();
+                        massFluxL = vxL < 0 ? mass*vxL*getdt()*cell->getHeight()/cell->getSize() : massL*vxL*getdt()*cell->getHeight()/cellL->getSize();
+                        vxFluxL = vxL < 0 ? mass*cell->getVelocity().getVx()*vxL*getdt()*cell->getHeight()/cell->getSize() : massL*cellL->getVelocity().getVx()*vxL*getdt()*cell->getHeight()/cellL->getSize();
                     }
-                    massFluxL = vxL < 0 ? cell->getMass()*vxL*getdt()*cell->getHeight()/cell->getSize() : massL*vxL*getdt()*cell->getHeight()/cellL->getSize();
-                    vxFluxL = vxL < 0 ? mass*cell->getVelocity().getVx()*vxL*getdt()*cell->getHeight()/cell->getSize() : massL*cellL->getVelocity().getVx()*vxL*getdt()*cell->getHeight()/cellL->getSize();
+                    // massFluxL = vxL < 0 ? mass*vxL*getdt()*cell->getHeight()/cell->getSize() : massL*vxL*getdt()*cell->getHeight()/cellL->getSize();
+                    // vxFluxL = vxL < 0 ? mass*cell->getVelocity().getVx()*vxL*getdt()*cell->getHeight()/cell->getSize() : massL*cellL->getVelocity().getVx()*vxL*getdt()*cell->getHeight()/cellL->getSize();
                 }
                 // not a boundary
                 if (cellT != cell) {
                     if (cellT->hasChildren()) {
-                        vyT = 0;
-                        massT = 0;
+                        // vyT = 0;
+                        // massT = 0;
                         FluidCell *children[2] = {cellT->sw, cellT->se};
                         for (int i = 0; i < 2; i++) {
-                            vyT += children[i]->getVelocity().getVy();
-                            massT += children[i]->getMass();
+                            vyT = (children[i]->getVelocity().getVy() + vC.getVy())/2;
+                            massT = children[i]->getMass();
+                            massFluxT += vyT > 0 ? mass*vyT*getdt()*children[i]->getWidth()/cell->getSize() : massT*vyT*getdt()*children[i]->getWidth()/children[i]->getSize();
+                            vyFluxT += vyT > 0 ? mass*cell->getVelocity().getVy()*vyT*getdt()*children[i]->getWidth()/cell->getSize() : massT*children[i]->getVelocity().getVy()*vyT*getdt()*children[i]->getWidth()/children[i]->getSize();
                         }
-                        massT /= 2;
-                        vyT = (vyT/2 + vC.getVy())/2;
+                        // massT /= 2;
+                        // vyT = (vyT/2 + vC.getVy())/2;
                         
                     } else {
                         // 2 times mass so that we take same amount of mass as 
                         //// having size/2 in flux calc
                         massT = cellT->getMass();
+                        massFluxT = vyT > 0 ? mass*vyT*getdt()*cell->getWidth()/cell->getSize() : massT*vyT*getdt()*cell->getWidth()/cellT->getSize();
+                        vyFluxT = vyT > 0 ? mass*cell->getVelocity().getVy()*vyT*getdt()*cell->getWidth()/cell->getSize() : massT*cellT->getVelocity().getVy()*vyT*getdt()*cell->getWidth()/cellT->getSize();
                     }
-                    massFluxT = vyT > 0 ? cell->getMass()*vyT*getdt()*cell->getWidth()/cell->getSize() : massT*vyT*getdt()*cell->getWidth()/cellT->getSize();
-                    vyFluxT = vyT > 0 ? mass*cell->getVelocity().getVy()*vyT*getdt()*cell->getWidth()/cell->getSize() : massT*cellT->getVelocity().getVy()*vyT*getdt()*cell->getWidth()/cellT->getSize();
+                    // massFluxT = vyT > 0 ? mass*vyT*getdt()*cell->getWidth()/cell->getSize() : massT*vyT*getdt()*cell->getWidth()/cellT->getSize();
+                    // vyFluxT = vyT > 0 ? mass*cell->getVelocity().getVy()*vyT*getdt()*cell->getWidth()/cell->getSize() : massT*cellT->getVelocity().getVy()*vyT*getdt()*cell->getWidth()/cellT->getSize();
                 }
                 // not a boundary
                 if (cellB != cell) {
                     if (cellB->hasChildren()) {
-                        vyB = 0;
-                        massB = 0;
+                        // vyB = 0;
+                        // massB = 0;
                         FluidCell *children[2] = {cellB->nw, cellB->ne};
                         for (int i = 0; i < 2; i++) {
-                            vyB += children[i]->getVelocity().getVy();
-                            massB += children[i]->getMass();
+                            vyB = (children[i]->getVelocity().getVy() + vC.getVy())/2;
+                            massB = children[i]->getMass();
+                            massFluxB += vyB < 0 ? mass*vyB*getdt()*children[i]->getWidth()/cell->getSize() : massB*vyB*getdt()*children[i]->getWidth()/children[i]->getSize();
+                            vyFluxB += vyB < 0 ? mass*cell->getVelocity().getVy()*vyB*getdt()*children[i]->getWidth()/cell->getSize() : massB*children[i]->getVelocity().getVy()*vyB*getdt()*children[i]->getWidth()/children[i]->getSize();
                         }
-                        massB /= 2;
-                        vyB = (vyB/2 + vC.getVy())/2;
+                        // massB /= 2;
+                        // vyB = (vyB/2 + vC.getVy())/2;
                         
                     } else {
                         // 2 times mass so that we take same amount of mass as 
                         //// having size/2 in flux calc
                         massB = cellB->getMass();
+                        massFluxB = vyB < 0 ? mass*vyB*getdt()*cell->getWidth()/cell->getSize() : massB*vyB*getdt()*cell->getWidth()/cellB->getSize();
+                        vyFluxB = vyB < 0 ? mass*cell->getVelocity().getVy()*vyB*getdt()*cell->getWidth()/cell->getSize() : massB*cellB->getVelocity().getVy()*vyB*getdt()*cell->getWidth()/cellB->getSize();
                     }
-                    massFluxB = vyB < 0 ? cell->getMass()*vyB*getdt()*cell->getWidth()/cell->getSize() : massB*vyB*getdt()*cell->getWidth()/cellB->getSize();
-                    vyFluxB = vyB < 0 ? mass*cell->getVelocity().getVy()*vyB*getdt()*cell->getWidth()/cell->getSize() : massB*cellB->getVelocity().getVy()*vyB*getdt()*cell->getWidth()/cellB->getSize();
+                    // massFluxB = vyB < 0 ? mass*vyB*getdt()*cell->getWidth()/cell->getSize() : massB*vyB*getdt()*cell->getWidth()/cellB->getSize();
+                    // vyFluxB = vyB < 0 ? mass*cell->getVelocity().getVy()*vyB*getdt()*cell->getWidth()/cell->getSize() : massB*cellB->getVelocity().getVy()*vyB*getdt()*cell->getWidth()/cellB->getSize();
                 }
                 // setAMR(cell);
                 cell->newMass = cell->getMass() - massFluxR + massFluxL - massFluxT + massFluxB;
-                // if (((getLocFromID(getIDfromLeaf(cell)).index == 0x301) || (getLocFromID(getIDfromLeaf(cell)).index == 0x300)) && getLocFromID(getIDfromLeaf(cell)).depth == 5) {
-                //     std::cout << vyT << " MFT: " << massFluxT << std::endl;
-                // } else if (getLocFromID(getIDfromLeaf(cell)).index == 0x6a && getLocFromID(getIDfromLeaf(cell)).depth == 4) {
-                //     std::cout << vyB << " MFB: " << massFluxB << std::endl;
+                // if (getIDfromLeaf(cell) == getID(4,0x74)) {
+                //     std::cout << vxL << " MFL: " << massFluxL << std::endl;
+                // } else if (getIDfromLeaf(cell) == getID(5,0x1c7) || getIDfromLeaf(cell) == getID(5,0x1c5)) {
+                //     std::cout << vxR << " MFR: " << massFluxR << std::endl;
                 // }
                 
-                double newVx = (cell->getMass()*cell->getVelocity().getVx() + -vxFluxR + vxFluxL)/cell->newMass;
-                double newVy = (cell->getMass()*cell->getVelocity().getVy() + -vyFluxT + vyFluxB)/cell->newMass;
+                double newVx = (mass*cell->getVelocity().getVx() + -vxFluxR + vxFluxL)/cell->newMass;
+                double newVy = (mass*cell->getVelocity().getVy() + -vyFluxT + vyFluxB)/cell->newMass;
                 cell->newVelocity = VelocityVector(newVx, newVy);
             }
             maxMass = thisMaxMass;
@@ -1046,6 +1067,8 @@ class FluidGrid {
                 island = island & (int)realNeighbs[i]->hasChildren();
                 willJump = willJump | (int)realNeighbs[i]->hasChildren();
             }
+            // avoiding flickering of corners
+            if (realNeighbs.size() < 3) island = false;
             if (island) {
                 cell->shouldRefine = true;
                 cell->shouldCoarsen = false;
@@ -1140,9 +1163,7 @@ class FluidGrid {
                         bool agreement = true;
                         for (int i = 0; i < 4; i++) {
                             agreement = siblings[i]->shouldCoarsen && agreement;
-                            // printID(id);
-                            // std::cout << std::endl;
-                            // std::cout << "agreement: " << siblings[i]->shouldCoarsen << std::endl;
+
                             siblings[i]->shouldCoarsen = false;
                             siblings[i]->shouldRefine = false;
                         }
@@ -1152,15 +1173,17 @@ class FluidGrid {
                             bool resJump = false;
                             FluidCell *adjCell;
                             for (int i = 0; i < 4; i++) {
+                                FluidCell *left = siblings[i]->getLeft();
+                                FluidCell *right = siblings[i]->getRight();
+                                FluidCell *top = siblings[i]->getTop();
+                                FluidCell *bottom = siblings[i]->getBottom();
+                                FluidCell *neighbs[4] = {left,right,top,bottom};
+
                                 for (int j = 0; j < 4; j++) {
-                                    // std::cout << "agreed " << dirs[i] << std::endl;
-                                    // std::cout << adjacentCell(loc.depth-1,loc.index >> 2,dirs[i]) << std::endl;
-                                    adjCell = adjacentCell(loc.depth,loc.index | i,dirs[j]);
                                     
-                                    if (adjCell != 0) {
-                                        resJump = resJump | adjCell->hasChildren();
+                                    if (neighbs[j] != cell) {
+                                        resJump = resJump | (neighbs[j]->hasChildren() | neighbs[j]->shouldRefine);
                                     }
-                                    // resJump = resJump | adjacentCell(loc.depth-1,loc.index >> 2,dirs[i])->hasChildren();
                                 }
                                 
                             }
@@ -1213,10 +1236,10 @@ class FluidGrid {
     private:
         int maxDepth = 6;
         int minDepth = 2;
-        float coarseThresh = 0.001;
+        float coarseThresh = 0.1;
         float refineThresh = 1;
         float densCoarseThresh = 0.01;
-        float densRefineThresh = 0.9;
+        float densRefineThresh = 0.8;
         double width, height;
         double maxV;
         double minSize; // minimum side length
@@ -1252,7 +1275,7 @@ class Simulator {
             double cellWidth, cellHeight;
             long double thisMaxDensity = 100;
             SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255); 
-            SDL_RenderClear(renderer);  // 💥 Clear every frame
+            SDL_RenderClear(renderer);
             for (const auto& pair : grid->getIDMap()) {
                 m = grid->getLocFromID(pair.first);
                 depth = m.depth;
@@ -1269,8 +1292,8 @@ class Simulator {
                 // SDL_RenderClear(renderer);
                 SDL_SetRenderDrawColor(renderer, 0, density/maxDensity*255, 0, 255);
                 SDL_RenderFillRect(renderer, &rect);
-                SDL_SetRenderDrawColor(renderer, 255,255,255, 255); // White outline
-                SDL_RenderDrawRect(renderer, &rect);
+                // SDL_SetRenderDrawColor(renderer, 255,255,255, 255); // White outline
+                // SDL_RenderDrawRect(renderer, &rect);
             }
             SDL_RenderPresent(renderer);
             if (thisMaxDensity > maxDensity) maxDensity = thisMaxDensity;
