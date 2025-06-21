@@ -698,15 +698,25 @@ class FluidGrid {
             if (cell->depth > cell->getTop()->depth && !cell->getTop()->refinedThisStep) refineCell(cell->getTop()->depth, cell->getTop()->index);
             if (cell->depth > cell->getBottom()->depth && !cell->getBottom()->refinedThisStep) refineCell(cell->getBottom()->depth, cell->getBottom()->index);
             // cell->refinedThisStep = true;
-            assignIDs(cell, depth, index);
+            
+            // assignIDs(cell, depth, index);
+            // this is faster than recursive call
+            idToCell.erase(getID(cell->depth, cell->index));
+            idToCell[getID(cell->nw->depth, cell->nw->index)] = cell->nw;
+            idToCell[getID(cell->ne->depth, cell->ne->index)] = cell->ne;
+            idToCell[getID(cell->sw->depth, cell->sw->index)] = cell->sw;
+            idToCell[getID(cell->se->depth, cell->se->index)] = cell->se;
+            
             if (cell->hasChildren()) {
                 if (cell->nw->getWidth() < minSize) minSize = cell->nw->getWidth();
                 else if (cell->nw->getHeight() < minSize) minSize = cell->nw->getHeight();
             }
             
+            
         }
 
         void coarsenCell(int depth, int index) {
+            
             // Get ID of cell to coarsen
             uint64_t parentID = getID(depth, index);
             // Index of first (nw) child will be 4 times index of parent
@@ -1058,53 +1068,14 @@ class FluidGrid {
                     cell->shouldRefine = false;
                     cell->shouldCoarsen = false;
                     if (loc.depth < maxDepth) {
-
-                        TreeLoc locT, locB, locL, locR;
-                        if (cell->getTop()->hasChildren()) {
-                            locT = getLocFromID(getIDfromLeaf(cell->getTop()->sw));
-                        } else {
-                            locT = getLocFromID(getIDfromLeaf(cell->getTop()));
-                        }
-                        if (cell->getBottom()->hasChildren()) {
-                            locB = getLocFromID(getIDfromLeaf(cell->getBottom()->nw));
-                        } else {
-                            locB = getLocFromID(getIDfromLeaf(cell->getBottom()));
-                        }
-                        if (cell->getLeft()->hasChildren()) {
-                            locL = getLocFromID(getIDfromLeaf(cell->getLeft()->ne));
-                        } else {
-                            locL = getLocFromID(getIDfromLeaf(cell->getLeft()));
-                        }
-                        if (cell->getRight()->hasChildren()) {
-                            locR = getLocFromID(getIDfromLeaf(cell->getRight()->nw));
-                        } else {
-                            locR = getLocFromID(getIDfromLeaf(cell->getRight()));
-                        }
-                        
-                        bool resJumpT = ((int)(loc.depth-locT.depth) > 0);
-                        bool resJumpB = ((int)(loc.depth-locB.depth) > 0);
-                        bool resJumpL = ((int)(loc.depth-locL.depth) > 0);
-                        bool resJumpR = ((int)(loc.depth-locR.depth) > 0);
-                        bool resJump = resJumpT || resJumpB || resJumpL || resJumpR;
-
                         if (!cell->refinedThisStep) refineCell(loc.depth, loc.index);
-
-                        // if (!resJump) {
-                        //     if (!cell->refinedThisStep) refineCell(loc.depth, loc.index);
-                        // } else {
-                        //     if (!cell->refinedThisStep) refineCell(loc.depth, loc.index);
-                        //     if (cell->getRight() != cell && !cell->getRight()->refinedThisStep && resJumpR) refineCell(locR.depth, locR.index);
-                        //     if (cell->getLeft() != cell && !cell->getLeft()->refinedThisStep && resJumpL) refineCell(locL.depth, locL.index);
-                        //     if (cell->getTop() != cell && !cell->getTop()->refinedThisStep && resJumpT) refineCell(locT.depth, locT.index);
-                        //     if (cell->getBottom() != cell && !cell->getBottom()->refinedThisStep && resJumpB) refineCell(locB.depth, locB.index);
-                        // }
                     }
                 } else if (cell->shouldCoarsen) {
                     uint64_t id = getIDfromLeaf(cell);
                     
                     TreeLoc loc = getLocFromID(id);
                     
-                    if (loc.depth > minDepth) {
+                    if (loc.depth > minDepth) {  
                         FluidCell *parent = cell->parent;
                         FluidCell *siblings[4] = {parent->nw, parent->ne, parent->sw, parent->se};
                         bool agreement = true;
@@ -1118,7 +1089,6 @@ class FluidGrid {
                         if (agreement) {
                             Direction dirs[4] = {DOWN, LEFT, UP, RIGHT};
                             bool resJump = false;
-                            FluidCell *adjCell;
                             for (int i = 0; i < 4; i++) {
                                 FluidCell *left = siblings[i]->getLeft();
                                 FluidCell *right = siblings[i]->getRight();
@@ -1127,19 +1097,15 @@ class FluidGrid {
                                 FluidCell *neighbs[4] = {left,right,top,bottom};
 
                                 for (int j = 0; j < 4; j++) {
-                                    
                                     if (neighbs[j] != cell) {
                                         resJump = resJump | (neighbs[j]->hasChildren() | neighbs[j]->shouldRefine);
                                     }
-                                }
-                                
-                            }
-                            if (!resJump) {
-                                coarsenCell(loc.depth-1, loc.index >> 2);
-                            }
+                                }                         
+                            }                            
+                            if (!resJump) coarsenCell(loc.depth-1, loc.index >> 2);
                         }
-                        
                     }
+                    cell->shouldRefine = false;
                     cell->shouldCoarsen = false;
                 }
             }
@@ -1160,7 +1126,7 @@ class FluidGrid {
             // dt = 0.9 * dt + 0.1 * new_dt; 
             maxV = 0;
             auto start = std::chrono::steady_clock::now();
-            solveGravPotential(10);
+            solveGravPotential(5);
             auto grav = std::chrono::steady_clock::now();
             updateVelocities();
             auto vel = std::chrono::steady_clock::now();
@@ -1197,7 +1163,7 @@ class FluidGrid {
 
     private:
         int maxDepth = 7;
-        int minDepth = 2;
+        int minDepth = 4;
         float coarseThresh = 0.1;
         float refineThresh = 1;
         float densCoarseThresh = 0.01;
@@ -1253,7 +1219,7 @@ class Simulator {
                 if (density > maxDensity) density = maxDensity;
                 // maxDensity = 1e19/(1e16/pow(4,5));
                 // SDL_RenderClear(renderer);
-                SDL_SetRenderDrawColor(renderer, 0, density/maxDensity*255, 0, 255);
+                SDL_SetRenderDrawColor(renderer, 0, pow(density/maxDensity,0.5)*255, 0, 255);
                 SDL_RenderFillRect(renderer, &rect);
                 // SDL_SetRenderDrawColor(renderer, 255,255,255, 255); // White outline
                 // SDL_RenderDrawRect(renderer, &rect);
