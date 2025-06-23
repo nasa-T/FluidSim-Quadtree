@@ -416,9 +416,11 @@ class FluidGrid {
             root = new FluidCell(nullptr, 0, 0, 10, width, height, 100, 0.8, 0.15, 0.05);
             refineGridtoDepth(root, 0, startDepth);
             assignIDs(root, 0, 0);
-            setNeighbors();
             leafCells.reserve(pow(4,maxDepth));
             updateLeafCells();
+            setNeighbors();
+            
+            
             double mass;
             maxV = 0;
             for (int i = 0; i < leafCells.size(); i++) {
@@ -634,10 +636,15 @@ class FluidGrid {
             uint32_t depth;
             uint32_t index;
             FluidCell *top, *bottom, *left, *right;
+            FluidCell *cell;
             for (const auto& pair : idToCell) {
+            // for (int i = 0; i < leafCells.size(); i++) {
+                // cell = leafCells[i];
                 TreeLoc loc = getLocFromID(pair.first);
                 depth = loc.depth;
                 index = loc.index;
+                // depth = cell->depth;
+                // index = cell->index;
 
                 top = adjacentCell(depth,index,UP);
                 if (top == 0) top = pair.second;
@@ -800,8 +807,33 @@ class FluidGrid {
                 FluidCell *cellL = cell->getLeft();
                 FluidCell *cellR = cell->getRight();
                 VelocityVector newV = VelocityVector(0,0);
-                double gradUy = (cellT->getGravPotential() - cellB->getGravPotential())/(2*cell->getHeight());
-                double gradUx = (cellR->getGravPotential() - cellL->getGravPotential())/(2*cell->getWidth());
+                double gravPotT, gravPotB, gravPotL, gravPotR;
+                if (cellT->hasChildren()) {
+                    gravPotT = (cellT->sw->getGravPotential() + cellT->se->getGravPotential())/2;
+                } else {
+                    gravPotT = cellT->getGravPotential();
+                }
+
+                if (cellB->hasChildren()) {
+                    gravPotB = (cellB->nw->getGravPotential() + cellB->ne->getGravPotential())/2;
+                } else {
+                    gravPotB = cellB->getGravPotential();
+                }
+
+                if (cellL->hasChildren()) {
+                    gravPotL = (cellL->ne->getGravPotential() + cellL->se->getGravPotential())/2;
+                } else {
+                    gravPotL = cellL->getGravPotential();
+                }
+
+                if (cellR->hasChildren()) {
+                    gravPotR = (cellR->nw->getGravPotential() + cellR->sw->getGravPotential())/2;
+                } else {
+                    gravPotR = cellR->getGravPotential();
+                }
+
+                double gradUy = (gravPotT - gravPotB)/(2*cell->getHeight());
+                double gradUx = (gravPotR - gravPotL)/(2*cell->getWidth());
                 newV.setVx(-gradUx*getdt());
                 newV.setVy(-gradUy*getdt());
                 // std::cout << gradUx*getdt() << std::endl;
@@ -1156,6 +1188,12 @@ class FluidGrid {
             // std::cout << std::chrono::duration_cast<std::chrono::microseconds>(leaf - amr).count() << "\n";
         }
 
+        void freeGrid() {
+            for (int i = 0; i < leafCells.size(); i++) {
+                free(leafCells[i]);
+            }
+        }
+
         std::vector<FluidCell*> getLeafCells() {
             return leafCells;
         }
@@ -1204,17 +1242,18 @@ class Simulator {
             long double thisMaxDensity = 100;
             SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255); 
             SDL_RenderClear(renderer);
-            for (const auto& pair : grid->getIDMap()) {
-                m = grid->getLocFromID(pair.first);
-                depth = m.depth;
-                index = m.index;
+            std::vector<FluidCell *> leaves = grid->getLeafCells();
+            for (int i = 0; i < leaves.size(); i++) {
+                FluidCell *cell = leaves[i];
+                depth = cell->depth;
+                index = cell->index;
                 xyBL = grid->getXY(depth, index);
                 cellWidth = width / pow(pow(4,depth), 0.5);
                 cellHeight = height / pow(pow(4,depth), 0.5);
 
                 SDL_Rect rect{(int)(xyBL.x/SCALE_W), (int)(consts::GRID_HEIGHT - ((xyBL.y+cellHeight)/SCALE_H)), (int)(cellWidth/SCALE_W)+1, (int)(cellHeight/SCALE_H)+1};
-                long double density = pair.second->getDensity();
-                // long double density = abs(pair.second->getGravPotential());
+                long double density = cell->getDensity();
+                // long double density = abs(cell->getGravPotential());
                 if (density > thisMaxDensity) thisMaxDensity = density;
                 if (density > maxDensity) density = maxDensity;
                 // maxDensity = 1e19/(1e16/pow(4,5));
@@ -1243,7 +1282,8 @@ class Simulator {
         }
 
         void freeSim() {
-            
+            grid->freeGrid();
+            free(grid);
             output.close();
         }
 
@@ -1306,6 +1346,7 @@ int main(int argv, char **argc) {
         // }
         
     }
+    sim.freeSim();
     // for (const auto& pair : sim.grid->getIDMap()) {
     //     printBinaryRecursive(pair.first);
     //     std::cout << ", Value: " << pair.second << std::endl;
