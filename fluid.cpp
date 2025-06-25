@@ -1302,42 +1302,236 @@ class Simulator {
             uint32_t depth, index;
             xyPos xyBL;
             double cellWidth, cellHeight;
-            long double thisMaxDensity = 1;
+            double thisMaxPressure = 0;
+            double thisMaxMass = 0;
+            double thisMaxDensity = 0;
+            double thisMaxTemperature = 0;
+            double thisMinTemperature = 0;
+            double thisMinGP = 0;
+            double thisMaxe = 0;
+            double thisMaxFusion = 0;
             SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255); 
             SDL_RenderClear(renderer);
             std::vector<FluidCell *> leaves = grid->getLeafCells();
             for (int i = 0; i < leaves.size(); i++) {
+                
                 FluidCell *cell = leaves[i];
                 depth = cell->depth;
                 index = cell->index;
-                // if (grid->getID(depth,index) == grid->getID(7,0x3029)) {
-                //     std::cout << cell->getVelocity().getVx() << ", " << cell->getVelocity().getVy() << std::endl;
-                // }
+                double pressure = cell->getPressure(false);
+                double density = cell->getDensity();
+                double temperature = cell->getTemp(false);
+                double gravPotential = cell->getGravPotential();
+                double e = cell->gete(false);
+                float X = cell->getX();
+                float Y = cell->getY();
+                float Z = cell->getZ();
+                float fusion = cell->getFusionEnergy();
+                uint degenerate = cell->getDegenerate();
                 xyBL = grid->getXY(depth, index);
                 cellWidth = width / pow(pow(4,depth), 0.5);
                 cellHeight = height / pow(pow(4,depth), 0.5);
 
                 SDL_Rect rect{(int)(xyBL.x/SCALE_W), (int)(consts::GRID_HEIGHT - ((xyBL.y+cellHeight)/SCALE_H)), (int)(cellWidth/SCALE_W)+1, (int)(cellHeight/SCALE_H)+1};
-                long double density = cell->getDensity();
-                // long double density = abs(cell->getGravPotential());
                 if (density > thisMaxDensity) thisMaxDensity = density;
                 if (density > maxDensity) density = maxDensity;
-                // maxDensity = 1e19/(1e16/pow(4,5));
-                // SDL_RenderClear(renderer);
-                SDL_SetRenderDrawColor(renderer, 0, pow(density/maxDensity,0.5)*255, 0, 255);
+                if (pressure > thisMaxPressure) {
+                    thisMaxPressure = pressure;
+                }
+                if (temperature > thisMaxTemperature) {
+                    thisMaxTemperature = temperature;
+                }
+                if (gravPotential < thisMinGP) thisMinGP = gravPotential;
+                if (e > thisMaxe) thisMaxe = e;
+                if (fusion > thisMaxFusion) thisMaxFusion = fusion;
+
+                double maxBit = 255.0;
+                double zero = 0;
+                if (pressureDisplay) {
+                    double scaledP_R = std::min(maxBit,255 * (pressure)/(maxPressure)); 
+                    if (scaledP_R < 0) scaledP_R = 0;
+
+                    SDL_SetRenderDrawColor(renderer, scaledP_R, 0, 255, 255);
+                } else if (densityDisplay) {                    
+                    double scaled_dens = std::sqrt(density/maxDensity) * 255;
+                    if (scaled_dens > 255) scaled_dens = 255;
+                    SDL_SetRenderDrawColor(renderer, scaled_dens, scaled_dens*(1-Y), 0, 255);
+                    // SDL_RenderFillRect(renderer, &rect);
+                } else if (temperatureDisplay) {
+                    double scaled_temp = std::min(maxBit,temperature/maxTemperature * 255);
+                    SDL_SetRenderDrawColor(renderer, 0, scaled_temp, 0, 255);
+                } else if (gravPotentialDisplay) {
+                    double scaled_pot = std::max(zero,std::min(maxBit,gravPotential/minGP * 255));
+                    // if (i == rows/2 && j == cols/2) printf("scaledGP:%f\n",gravPotential/minGP);
+                    SDL_SetRenderDrawColor(renderer, 255, scaled_pot, 0, 255);
+
+                } else if (energyDisplay) {
+                    double scaled_e = std::max(zero,std::min(maxBit,e/maxe * 255));
+                    SDL_SetRenderDrawColor(renderer, scaled_e, 0, 0, 255);
+                } else if (hydrogenDisplay) {
+                    int scaled_X = X*255;
+                    SDL_SetRenderDrawColor(renderer, scaled_X, scaled_X, 0, 255);
+                } else if (heliumDisplay) {
+                    int scaled_Y = Y*255;
+                    SDL_SetRenderDrawColor(renderer, scaled_Y, 0, scaled_Y, 255);
+                } else if (ZDisplay) {
+                    int scaled_Z = Z*255;
+                    SDL_SetRenderDrawColor(renderer, 0, 0, scaled_Z, 255);   
+                } else if (fusionDisplay) {
+                    double scaled_fusion = std::max(zero,std::min(maxBit,fusion/maxFusion * 255));
+                    if (maxFusion == 0) scaled_fusion = 0;
+                    SDL_SetRenderDrawColor(renderer, 0, scaled_fusion, scaled_fusion, 255);
+                } else if (degenerateDisplay) {
+                    double deg = degenerate*255;
+                    SDL_SetRenderDrawColor(renderer, 0, 0, deg, 255);
+                }
+                
                 SDL_RenderFillRect(renderer, &rect);
-                // SDL_SetRenderDrawColor(renderer, 255,255,255, 255); // White outline
-                // SDL_RenderDrawRect(renderer, &rect);
+                SDL_SetRenderDrawColor(renderer, 255,255,255, 255); // White outline
+                SDL_RenderDrawRect(renderer, &rect);
+                
             }
+            maxPressure = thisMaxPressure;
+            maxDensity = thisMaxDensity;
+            // maxDensity = 10;
+            maxMass = thisMaxMass;
+            maxTemperature = thisMaxTemperature;
+            minTemperature = thisMinTemperature;
+            minGP = thisMinGP; // grav potential
+            maxe = thisMaxe;
+            maxFusion = thisMaxFusion;
             SDL_RenderPresent(renderer);
             if (thisMaxDensity > maxDensity) maxDensity = thisMaxDensity;
         }
         
-        void step() {
+        void step(SDL_Event event) {
             grid->update();
             dt = grid->getdt();
             t += grid->getdt();
-
+            if (event.key.type == SDL_KEYDOWN) {
+                // printf("key clicked\n");
+                switch (event.key.keysym.sym) {
+                    case SDLK_p:
+                        densityDisplay = 0;
+                        temperatureDisplay = 0;
+                        gravPotentialDisplay = 0;
+                        energyDisplay = 0;
+                        pressureDisplay = !(pressureDisplay);
+                        hydrogenDisplay = 0;
+                        heliumDisplay = 0;
+                        ZDisplay = 0;
+                        fusionDisplay = 0;
+                        degenerateDisplay = 0;
+                        break;
+                    case SDLK_d:
+                        pressureDisplay = 0;
+                        temperatureDisplay = 0;
+                        gravPotentialDisplay = 0;
+                        energyDisplay = 0;
+                        densityDisplay = !(densityDisplay);
+                        hydrogenDisplay = 0;
+                        heliumDisplay = 0;
+                        ZDisplay = 0;
+                        fusionDisplay = 0;
+                        degenerateDisplay = 0;
+                        break;
+                    case SDLK_t:
+                        densityDisplay = 0;
+                        pressureDisplay = 0;
+                        gravPotentialDisplay = 0;
+                        energyDisplay = 0;
+                        temperatureDisplay = !(temperatureDisplay);
+                        hydrogenDisplay = 0;
+                        heliumDisplay = 0;
+                        ZDisplay = 0;
+                        fusionDisplay = 0;
+                        degenerateDisplay = 0;
+                        break;
+                    case SDLK_u:
+                        densityDisplay = 0;
+                        pressureDisplay = 0;
+                        temperatureDisplay = 0;
+                        energyDisplay = 0;
+                        gravPotentialDisplay = !(gravPotentialDisplay);
+                        hydrogenDisplay = 0;
+                        heliumDisplay = 0;
+                        ZDisplay = 0;
+                        fusionDisplay = 0;
+                        degenerateDisplay = 0;
+                        break;
+                    case SDLK_e:
+                        densityDisplay = 0;
+                        pressureDisplay = 0;
+                        temperatureDisplay = 0;
+                        gravPotentialDisplay = 0;
+                        energyDisplay = !(energyDisplay);
+                        hydrogenDisplay = 0;
+                        heliumDisplay = 0;
+                        ZDisplay = 0;
+                        fusionDisplay = 0;
+                        degenerateDisplay = 0;
+                        break;
+                    case SDLK_7:
+                        densityDisplay = 0;
+                        pressureDisplay = 0;
+                        temperatureDisplay = 0;
+                        gravPotentialDisplay = 0;
+                        energyDisplay = 0;
+                        hydrogenDisplay = !(hydrogenDisplay);
+                        heliumDisplay = 0;
+                        ZDisplay = 0;
+                        fusionDisplay = 0;
+                        degenerateDisplay = 0;
+                        break;
+                    case SDLK_8:
+                        densityDisplay = 0;
+                        pressureDisplay = 0;
+                        temperatureDisplay = 0;
+                        gravPotentialDisplay = 0;
+                        energyDisplay = 0;
+                        hydrogenDisplay = 0;
+                        heliumDisplay = !(heliumDisplay);
+                        ZDisplay = 0;
+                        fusionDisplay = 0;
+                        degenerateDisplay = 0;
+                        break;
+                    case SDLK_9:
+                        densityDisplay = 0;
+                        pressureDisplay = 0;
+                        temperatureDisplay = 0;
+                        gravPotentialDisplay = 0;
+                        energyDisplay = 0;
+                        hydrogenDisplay = 0;
+                        heliumDisplay = 0;
+                        ZDisplay = !(ZDisplay);
+                        fusionDisplay = 0;
+                        degenerateDisplay = 0;
+                        break;
+                    case SDLK_f:
+                        densityDisplay = 0;
+                        pressureDisplay = 0;
+                        temperatureDisplay = 0;
+                        gravPotentialDisplay = 0;
+                        energyDisplay = 0;
+                        hydrogenDisplay = 0;
+                        heliumDisplay = 0;
+                        ZDisplay = 0;
+                        fusionDisplay = !(fusionDisplay);
+                        degenerateDisplay = 0;
+                        break;
+                    case SDLK_o:
+                        densityDisplay = 0;
+                        pressureDisplay = 0;
+                        temperatureDisplay = 0;
+                        gravPotentialDisplay = 0;
+                        energyDisplay = 0;
+                        hydrogenDisplay = 0;
+                        heliumDisplay = 0;
+                        ZDisplay = 0;
+                        fusionDisplay = 0;
+                        degenerateDisplay = !(degenerateDisplay);
+                }
+            }
             drawCells();
             // SDL_Delay(grid->getdt()*1000);  // setting some Delay
             SDL_Delay(16);
@@ -1372,13 +1566,23 @@ class Simulator {
         double t = 0;
         double maxMass = 255;
         double maxPressure = 1;
-        double minPressure = 0;
         double maxDensity = 1;
         double maxTemperature = 1;
         double minTemperature = 0;
         double minGP = 0;
         double maxe = 0;
         double maxFusion = 0;
+        uint pressureDisplay = 0; 
+        uint temperatureDisplay = 0;
+        uint densityDisplay = 1;
+        uint gravityFlag = 0;
+        uint gravPotentialDisplay = 0;
+        uint energyDisplay = 0;
+        uint heliumDisplay = 0;
+        uint hydrogenDisplay = 0;
+        uint ZDisplay = 0;
+        uint fusionDisplay = 0;
+        uint degenerateDisplay = 0;
 };
 
 void printBinaryRecursive(uint64_t num) {
@@ -1408,7 +1612,7 @@ int main(int argv, char **argc) {
         SDL_PollEvent(&event);
         // sim.drawCells();
         // if (event.key.state == SDLK_SPACE) {
-            sim.step();
+            sim.step(event);
         // }
         
     }
