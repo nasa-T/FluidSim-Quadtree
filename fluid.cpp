@@ -223,7 +223,7 @@ class FluidCell {
         }
 
         void sete(long double energy) {
-            if (mass > 0) {
+            if (mass > 0 && energy > 0) {
                 e = energy;
             } else {
                 e = 0;
@@ -238,7 +238,7 @@ class FluidCell {
         }
 
         void setE(long double energy) {
-            if (mass > 0) {
+            if (mass > 0 && energy > 0) {
                 E = energy;
             } else {
                 E = 0;
@@ -438,7 +438,7 @@ class FluidGrid {
                 xyPos xy = getXY(cell->depth,cell->index);
                 double radius = pow(width*height,0.5)/3;
                 double dist = pow(pow(width/2-xy.x,2) + pow(height/2-xy.y,2),0.5);
-                mass = dist < radius ? pow(1-dist/radius,3)*1e30/numCells : 1e16;
+                mass = dist < radius ? pow(1-dist/radius,3)*1e25/numCells : 1e10;
                 temp = dist < radius ? pow(1-dist/radius,3)*1e5 : 10;
                 // temp = dist < radius ? std::sin(consts::PI/2 * dist / radius) / (consts::PI * dist / radius) * 2e6 : 10;
                 cell->setMass(mass);
@@ -820,6 +820,7 @@ class FluidGrid {
         void updateVelocities() {
             for (int i = 0; i < leafCells.size(); i++) {
                 FluidCell *cell = leafCells[i];
+                cell->setE(cell->gete(false) + 0.5*cell->getDensity()*cell->getVelocity().getMag()*cell->getVelocity().getMag());
                 FluidCell *cellT = cell->getTop();
                 FluidCell *cellB = cell->getBottom();
                 FluidCell *cellL = cell->getLeft();
@@ -881,21 +882,25 @@ class FluidGrid {
                 }
 
                 cell->setVelocity(newV);
-                cell->setE(cell->gete(false) + 0.5*cell->getMass()*newV.getMag()*newV.getMag());
-                // std::cout << "vel E: " << cell->getE(false) << std::endl;
+                
+                // if (abs(cell->getVelocity().getVx()) > 1) {
+                //     std::cout << cell->depth << ", ";
+                //     printID(cell->index);
+                //     std::cout << " " << cell->getVelocity().getVx() << ", " << newV.getVx() << " " << -gradPx/cell->getDensity()*getdt() << std::endl;
+                // }
+                // std::cout << "vel E: " << cell->gete(false) << std::endl;
             }
         }
 
         void energyUpdate() {
-            int i, j;
-            // #pragma omp parallel for collapse(2)
-            // #pragma omp parallel for schedule(dynamic, 4)
-            for (i = 0; i < leafCells.size(); i++) {
+            for (int i = 0; i < leafCells.size(); i++) {
                 FluidCell *cell = leafCells[i];
                 FluidCell *cellT = cell->getTop();
                 FluidCell *cellB = cell->getBottom();
                 FluidCell *cellL = cell->getLeft();
                 FluidCell *cellR = cell->getRight();
+
+                double density = cell->getDensity();
 
                 double gravT, gravB, gravL, gravR;
                 double pressT, pressB, pressL, pressR;
@@ -963,15 +968,15 @@ class FluidGrid {
                 double E = cell->getE(false);
 
                 // nuclear fusion
-                double fusionEnergy = fusionRateH(cell->getDensity(), cell->getTemp(false), cell->getX()) * getdt();
-                double fusionHeEnergy = fusionRateHe(cell->getDensity(), cell->getTemp(false), cell->getY()) * getdt();
+                double fusionEnergy = fusionRateH(density, cell->getTemp(false), cell->getX()) * getdt();
+                double fusionHeEnergy = fusionRateHe(density, cell->getTemp(false), cell->getY()) * getdt();
                 cell->setFusionEnergy((fusionEnergy+fusionHeEnergy)/getdt());
                 E += fusionEnergy+fusionHeEnergy;
 
                 // Update hydrogen and helium abundances
-                double dX = fusionEnergy / (consts::QH_He * cell->getDensity());
+                double dX = fusionEnergy / (consts::QH_He * density);
                 cell->HtoHe(dX);
-                double dY = fusionHeEnergy / (consts::QHe_C * cell->getDensity());
+                double dY = fusionHeEnergy / (consts::QHe_C * density);
                 cell->HetoZ(dY);
 
                 // pressure-work term
@@ -985,7 +990,6 @@ class FluidGrid {
                 }
 
                 // cooling
-                double density = cell->getDensity();
                 double T = cell->getTemp(false);
                 double Z = cell->getZ();
                 double lambda = coolingFunction(density,T,Z);
@@ -1001,7 +1005,7 @@ class FluidGrid {
                 double gy = -(gravT-gravB)/(distT+distB);
                 // double gravR = getCell(i,j+1)->getGravPotential();
                 double gx = -(gravR-gravL)/(distR+distL);
-                double gravWork = (cell->getVelocity().getVx()*gx+cell->getVelocity().getVy()*gy)*cell->getDensity();
+                double gravWork = (cell->getVelocity().getVx()*gx+cell->getVelocity().getVy()*gy)*density;
                 if (E + gravWork * getdt() >= 0) {
                     E += gravWork * getdt();
                 } else {
@@ -1196,7 +1200,20 @@ class FluidGrid {
                 // }
                 // std::cout << "E " << E << ", newE " << cell->newE << std::endl;
                 double newVx = (mass*cell->getVelocity().getVx() + -vxFluxR + vxFluxL)/cell->newMass;
+                if (abs(newVx*getdt()/cell->getWidth()) > 1) {
+                    int sign = newVx > 0 ? 1 : -1;
+                    newVx = sign*cell->getWidth()/getdt();
+                }
                 double newVy = (mass*cell->getVelocity().getVy() + -vyFluxT + vyFluxB)/cell->newMass;
+                if (abs(newVy*getdt()/cell->getHeight()) > 1) {
+                    int sign = newVy > 0 ? 1 : -1;
+                    newVy = sign*cell->getHeight()/getdt();
+                }
+                // if (abs(cell->getVelocity().getVx()) > 1) {
+                //     std::cout << cell->depth << ", ";
+                //     printID(cell->index);
+                //     std::cout << " " << cell->getVelocity().getVx() << ", " << newVx*getdt()/cell->getWidth() << std::endl;
+                // }
                 cell->newVelocity = VelocityVector(newVx, newVy);
                 cell->newX = (mass*X - XFluxR + XFluxL - XFluxT + XFluxB)/cell->newMass;
                 cell->newY = (mass*Y - YFluxR + YFluxL - YFluxT + YFluxB)/cell->newMass;
@@ -1213,10 +1230,13 @@ class FluidGrid {
                 cell->setVelocity(cell->newVelocity);
                 cell->setX(std::max(0.0f,std::min(1.0f,cell->newX)));
                 cell->setY(std::max(0.0f,std::min(1.0f,cell->newY)));
-                cell->sete(cell->newE - 0.5*cell->newMass*cell->newVelocity.getMag()*cell->newVelocity.getMag());
+                cell->sete(cell->getE(false) - 0.5*cell->getDensity()*cell->getVelocity().getMag()*cell->getVelocity().getMag());
                 cell->getTemp(true);
                 cell->getPressure(true);
-                // std::cout << cell->gete(false) << ", " << cell->getE(false) << std::endl;
+                // if (cell->gete(false) < 0) {
+                //     std::cout << cell->getE(false) << ", " << cell->getTemp(false) << ", " << 0.5*cell->getDensity()*cell->getVelocity().getMag() << std::endl;
+                // }
+                
             }
         }
 
@@ -1371,7 +1391,7 @@ class FluidGrid {
         void update() {
             double new_dt = 0.7*minSize / maxV;
             dt = std::min(new_dt, dt*1.25);
-            std::cout << maxV << ", " << dt << std::endl; 
+            // std::cout << maxV << ", " << dt << std::endl; 
             // dt = 0.9 * dt + 0.1 * new_dt; 
             maxV = 0;
             auto start = std::chrono::steady_clock::now();
@@ -1379,7 +1399,7 @@ class FluidGrid {
             auto grav = std::chrono::steady_clock::now();
             updateVelocities();
             auto vel = std::chrono::steady_clock::now();
-            // energyUpdate();
+            energyUpdate();
             advect();
             auto adv = std::chrono::steady_clock::now();
             // std::cout << "\r" << totMass << std::endl;
@@ -1556,6 +1576,7 @@ class Simulator {
             maxMass = thisMaxMass;
             maxTemperature = thisMaxTemperature;
             minTemperature = thisMinTemperature;
+            // std::cout << maxTemperature << std::endl;
             minGP = thisMinGP; // grav potential
             maxe = thisMaxe;
             maxFusion = thisMaxFusion;
@@ -1772,10 +1793,10 @@ int main(int argv, char **argc) {
     SDL_PollEvent(&event);
     while(!(event.type == SDL_QUIT)){
         SDL_PollEvent(&event);
-        sim.drawCells();
-        if (event.key.state == SDLK_SPACE) {
+        // sim.drawCells();
+        // if (event.key.state == SDLK_SPACE) {
             sim.step(event);
-        }
+        // }
         
     }
     sim.freeSim();
