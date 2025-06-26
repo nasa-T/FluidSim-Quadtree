@@ -438,8 +438,8 @@ class FluidGrid {
                 xyPos xy = getXY(cell->depth,cell->index);
                 double radius = pow(width*height,0.5)/3;
                 double dist = pow(pow(width/2-xy.x,2) + pow(height/2-xy.y,2),0.5);
-                mass = dist < radius ? pow(1-dist/radius,3)*1e25/numCells : 1e10;
-                temp = dist < radius ? pow(1-dist/radius,3)*1e5 : 10;
+                mass = dist < radius ? pow(1-dist/radius,3)*1e22/numCells : 1e10;
+                temp = dist < radius ? pow(1-dist/radius,3)*1e6 : 10;
                 // temp = dist < radius ? std::sin(consts::PI/2 * dist / radius) / (consts::PI * dist / radius) * 2e6 : 10;
                 cell->setMass(mass);
                 cell->setTemp(temp);
@@ -1182,22 +1182,35 @@ class FluidGrid {
                         EB = cell->getE(false);
                         massFluxB = vyB < 0 ? mass*vyB*getdt()*cell->getWidth()/cell->getSize() : massB*vyB*getdt()*cell->getWidth()/cellB->getSize();
                         EFluxB = vyB < 0 ? E*vyB*getdt()*cell->getWidth()/cell->getSize() : EB*vyB*getdt()*cell->getWidth()/cellB->getSize();
-                        if (!std::isfinite(EFluxB)) {
-                            std::cout << "nan: " << E << ", " << vyB << ", " << EB << ", " << getdt() << std::endl;
-                        }
+                        // if (!std::isfinite(EFluxB)) {
+                        //     std::cout << "nan: " << E << ", " << vyB << ", " << EB << ", " << getdt() << std::endl;
+                        // }
                         vyFluxB = vyB < 0 ? mass*cell->getVelocity().getVy()*vyB*getdt()*cell->getWidth()/cell->getSize() : massB*cellB->getVelocity().getVy()*vyB*getdt()*cell->getWidth()/cellB->getSize();
                         XFluxB = vyB < 0 ? mass*X*vyB*getdt()*cellB->getWidth()/cell->getSize() : massB*cellB->getX()*vyB*getdt()*cellB->getWidth()/cellB->getSize();
                         YFluxB = vyB < 0 ? mass*Y*vyB*getdt()*cellB->getWidth()/cell->getSize() : massB*cellB->getY()*vyB*getdt()*cellB->getWidth()/cellB->getSize();
                     }
                 }
+                // if (!std::isfinite(EFluxR)) {
+                //     EFluxR = 0;
+                // }
+                // if (!std::isfinite(EFluxL)) {
+                //     EFluxL = 0;
+                // }
+                // if (!std::isfinite(EFluxT)) {
+                //     EFluxT = 0;
+                // }
+                // if (!std::isfinite(EFluxB)) {
+                //     EFluxB = 0;
+                // }
                 // setAMR(cell);
                 cell->newMass = cell->getMass() - massFluxR + massFluxL - massFluxT + massFluxB;
                 cell->newE = E - EFluxR + EFluxL - EFluxT + EFluxB;
-                // if (!std::isfinite(cell->newE)) {
-                //     std::cout << "nan: " << EFluxR << ", " << EFluxL << ", " << EFluxT << ", " <<  EFluxB << std::endl;
-                //     printID(getID(cell->depth, cell->index));
-                //     std::cout << std::endl;
-                // }
+                if (!std::isfinite(cell->newE)) {
+                    std::cout << "nan: " << EFluxR << ", " << EFluxL << ", " << EFluxT << ", " <<  EFluxB << std::endl;
+                    printID(getID(cell->depth, cell->index));
+                    std::cout << std::endl;
+                    cell->newE = cell->getE(false);
+                }
                 // std::cout << "E " << E << ", newE " << cell->newE << std::endl;
                 double newVx = (mass*cell->getVelocity().getVx() + -vxFluxR + vxFluxL)/cell->newMass;
                 if (abs(newVx*getdt()/cell->getWidth()) > 1) {
@@ -1390,16 +1403,17 @@ class FluidGrid {
 
         void update() {
             double new_dt = 0.7*minSize / maxV;
-            dt = std::min(new_dt, dt*1.25);
+            dt = std::max(std::min(new_dt, dt*1.25),1.0);
             // std::cout << maxV << ", " << dt << std::endl; 
             // dt = 0.9 * dt + 0.1 * new_dt; 
             maxV = 0;
             auto start = std::chrono::steady_clock::now();
-            solveGravPotential(5);
+            solveGravPotential(3);
             auto grav = std::chrono::steady_clock::now();
             updateVelocities();
             auto vel = std::chrono::steady_clock::now();
             energyUpdate();
+            auto nrg = std::chrono::steady_clock::now();
             advect();
             auto adv = std::chrono::steady_clock::now();
             // std::cout << "\r" << totMass << std::endl;
@@ -1407,17 +1421,20 @@ class FluidGrid {
                 setAMR(leafCells[i]);
             }
             auto setamr = std::chrono::steady_clock::now();
-            // checkAMR();
+            checkAMR();
             auto amr = std::chrono::steady_clock::now();
             updateLeafCells();
             auto leaf = std::chrono::steady_clock::now();
 
+            std::cout << totMass << std::endl;
             // std::cout << "grav: ";
             // std::cout << std::chrono::duration_cast<std::chrono::microseconds>(grav - start).count() << "\n";
             // std::cout << "vel: ";
             // std::cout << std::chrono::duration_cast<std::chrono::microseconds>(vel - grav).count() << "\n";
+            // std::cout << "nrg: ";
+            // std::cout << std::chrono::duration_cast<std::chrono::microseconds>(nrg - vel).count() << "\n";
             // std::cout << "adv: ";
-            // std::cout << std::chrono::duration_cast<std::chrono::microseconds>(adv - vel).count() << "\n";
+            // std::cout << std::chrono::duration_cast<std::chrono::microseconds>(adv - nrg).count() << "\n";
             // std::cout << "setAMR: ";
             // std::cout << std::chrono::duration_cast<std::chrono::microseconds>(setamr - adv).count() << "\n";
             // std::cout << "AMR: ";
@@ -1439,7 +1456,7 @@ class FluidGrid {
 
     private:
         int maxDepth = 7;
-        int minDepth = 4;
+        int minDepth = 3;
         // gradient thresh
         float coarseThresh = 0.1; 
         float refineThresh = 1;
