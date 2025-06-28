@@ -311,6 +311,7 @@ class FluidCell {
                 }
             }
         }
+
         void setVelocity(double vx, double vy) {
             velocity.setVx(vx);
             velocity.setVy(vy);
@@ -319,11 +320,13 @@ class FluidCell {
             // velocity = vel2;
             // vBounds.setVelocity(vel2);
         }
+
         void setVelocity(VelocityVector v) {
             velocity = v;
             // setE(e + 1/2*getDensity()*velocity.getMag()*velocity.getMag());
             // getE(true);
         }
+
         VelocityVector getVelocity() {
             // return VelocityVector(0,1);
             return velocity;
@@ -341,6 +344,14 @@ class FluidCell {
             sw->setGravPotential(gravPotential);
             se = new FluidCell(this, depth+1, (index << 2) | 3, mass/4, width/2, height/2, temperature, hydrogen, helium, metals);
             se->setGravPotential(gravPotential);
+            nw->sete(e);
+            ne->sete(e);
+            sw->sete(e);
+            se->sete(e);
+            nw->setE(E);
+            ne->setE(E);
+            sw->setE(E);
+            se->setE(E);
 
         }
 
@@ -372,11 +383,12 @@ class FluidCell {
             avgTemp /= 4;
             avgPressure /= 4;
             avgGravPotential /= 4;
-            
+            tote /= 4;
+
             setMass(totMass);
             sete(tote);
-            setE(totE);
-            setTemp(avgTemp);
+            // setE(totE);
+            // setTemp(avgTemp);
             setPressure(avgPressure);
             setGravPotential(avgGravPotential);
         }
@@ -429,18 +441,27 @@ class FluidGrid {
             updateLeafCells();
             setNeighbors();
             
-            
             double mass, temp;
             maxV = 0;
             for (int i = 0; i < leafCells.size(); i++) {
                 FluidCell *cell = leafCells[i];
                 // mass = (std::rand() % 100) * 1e16;
                 xyPos xy = getXY(cell->depth,cell->index);
-                double radius = pow(width*height,0.5)/3;
+                double radius = pow(width*height,0.5)/2.5;
                 double dist = pow(pow(width/2-xy.x,2) + pow(height/2-xy.y,2),0.5);
-                mass = dist < radius ? pow(1-dist/radius,3)*1e22/numCells : 1e10;
-                temp = dist < radius ? pow(1-dist/radius,3)*1e6 : 10;
-                // temp = dist < radius ? std::sin(consts::PI/2 * dist / radius) / (consts::PI * dist / radius) * 2e6 : 10;
+                double Tc = 1.5e7;
+                double mc = 1e22;
+                // mass = dist < radius ? pow(1-dist/radius,3)*1e24/numCells : 1e18/numCells;
+                mass = dist < radius ? std::sin(consts::PI/2 * dist/radius)/(consts::PI *dist/radius) * mc/numCells : 0/numCells;
+                // temp = dist < radius ? pow(1-dist/radius,3)*1e6 : 10;
+                // temp = dist < radius ? std::cos(consts::PI/2 * dist / (radius*1.5)) / (consts::PI * dist / (radius*1.5)) * 1e5 : 10;
+                temp = dist < radius ? std::sin(consts::PI/2 * dist / radius) / (consts::PI * dist / radius) * Tc : 100;
+                // temp = 1e6;
+                if (dist == 0) {
+                    mass = mc/numCells;
+                    temp = Tc;
+                }
+
                 cell->setMass(mass);
                 cell->setTemp(temp);
                 cell->gete(true);
@@ -873,7 +894,7 @@ class FluidGrid {
                 double gradPy = (pressT - pressB)/(distT+distB);
                 double gradPx = (pressR - pressL)/(distL+distR);
                 VelocityVector v = cell->getVelocity();
-                if (cell->getDensity() > 0.000001*maxDensity) {
+                if (cell->getDensity() > 0.00001*maxDensity && std::isfinite(newV.getVx()) && std::isfinite(newV.getVy())) {
                     newV.setVx(v.getVx() + (-gradUx-gradPx/cell->getDensity())*getdt());
                     newV.setVy(v.getVy() + (-gradUy-gradPy/cell->getDensity())*getdt());
                 } else {
@@ -882,7 +903,6 @@ class FluidGrid {
                 }
 
                 cell->setVelocity(newV);
-                
                 // if (abs(cell->getVelocity().getVx()) > 1) {
                 //     std::cout << cell->depth << ", ";
                 //     printID(cell->index);
@@ -895,6 +915,9 @@ class FluidGrid {
         void energyUpdate() {
             for (int i = 0; i < leafCells.size(); i++) {
                 FluidCell *cell = leafCells[i];
+                if (cell->getDensity() < 1e-3*maxDensity) {
+                    continue;
+                }
                 FluidCell *cellT = cell->getTop();
                 FluidCell *cellB = cell->getBottom();
                 FluidCell *cellL = cell->getLeft();
@@ -1015,6 +1038,7 @@ class FluidGrid {
                 // std::cout << "E: " << E << std::endl;
                 // std::cout << "E: " << cell->getE(false) << std::endl;
                 cell->setE(E);
+                
             }
         }
 
@@ -1192,15 +1216,19 @@ class FluidGrid {
                 }
                 // if (!std::isfinite(EFluxR)) {
                 //     EFluxR = 0;
+                //     // std::cout << vxR << ", " << massR << std::endl;
                 // }
                 // if (!std::isfinite(EFluxL)) {
                 //     EFluxL = 0;
+                //     // std::cout << vxL << ", " << massL << std::endl;
                 // }
                 // if (!std::isfinite(EFluxT)) {
                 //     EFluxT = 0;
+                //     // std::cout << vyT << ", " << massT << std::endl;
                 // }
                 // if (!std::isfinite(EFluxB)) {
                 //     EFluxB = 0;
+                //     // std::cout << vyB << ", " << massB << std::endl;
                 // }
                 // setAMR(cell);
                 cell->newMass = cell->getMass() - massFluxR + massFluxL - massFluxT + massFluxB;
@@ -1246,9 +1274,7 @@ class FluidGrid {
                 cell->sete(cell->getE(false) - 0.5*cell->getDensity()*cell->getVelocity().getMag()*cell->getVelocity().getMag());
                 cell->getTemp(true);
                 cell->getPressure(true);
-                // if (cell->gete(false) < 0) {
-                //     std::cout << cell->getE(false) << ", " << cell->getTemp(false) << ", " << 0.5*cell->getDensity()*cell->getVelocity().getMag() << std::endl;
-                // }
+                // std::cout << cell->gete(false) << std::endl;
                 
             }
         }
@@ -1265,45 +1291,47 @@ class FluidGrid {
             // long double massL = cellL->getMass();
             // long double massT = cellT->getMass();
             // long double massB = cellB->getMass();
-            long double mass = cell->getDensity();
-            long double massR = cellR->getDensity();
-            long double massL = cellL->getDensity();
-            long double massT = cellT->getDensity();
-            long double massB = cellB->getDensity();
-            if (abs(massR - mass)/mass > refineThresh) {
+            long double density = cell->getDensity();
+            long double densityR = cellR->getDensity();
+            long double densityL = cellL->getDensity();
+            long double densityT = cellT->getDensity();
+            long double densityB = cellB->getDensity();
+
+            if (abs(densityR - density)/density > refineThresh) {
                 cell->shouldRefine = true;
                 // cellR->shouldRefine = true;
-            } else if (abs(massR - mass)/mass < coarseThresh) {
+            } else if (abs(densityR - density)/density < coarseThresh) {
                 cell->shouldCoarsen = true;
             } else {
                 cell->shouldCoarsen = false;
             }
-            if (abs(massL - mass)/mass > refineThresh) {
+            if (abs(densityL - density)/density > refineThresh) {
                 cell->shouldRefine = true;
                 // cellL->shouldRefine = true;
-            } else if (abs(massL - mass)/mass < coarseThresh) {
+            } else if (abs(densityL - density)/density < coarseThresh) {
                 cell->shouldCoarsen = true;
             } else {
                 cell->shouldCoarsen = false;
             }
-            if (abs(massT - mass)/mass > refineThresh) {
+            if (abs(densityT - density)/density > refineThresh) {
                 // std::cout << "grad " << abs(massT - mass)/mass << std::endl;
                 // std::cout << massT << ", " << mass << std::endl;
                 cell->shouldRefine = true;
                 // cellT->shouldRefine = true;
-            } else if (abs(massT - mass)/mass < coarseThresh) {
+            } else if (abs(densityT - density)/density < coarseThresh) {
                 cell->shouldCoarsen = true;
             } else {
                 cell->shouldCoarsen = false;
             }
-            if (abs(massB - mass)/mass > refineThresh) {
+            if (abs(densityB - density)/density > refineThresh) {
                 cell->shouldRefine = true;
                 // cellB->shouldRefine = true;
-            } else if (abs(massB - mass)/mass < coarseThresh) {
+            } else if (abs(densityB - density)/density < coarseThresh) {
                 cell->shouldCoarsen = true;
             } else {
                 cell->shouldCoarsen = false;
             }
+
             FluidCell *neighbors[4] = {cellT, cellB, cellL, cellR};
             std::vector<FluidCell *> realNeighbs;
             bool island = true;
@@ -1318,14 +1346,14 @@ class FluidGrid {
                 willJump = willJump | (int)realNeighbs[i]->hasChildren();
             }
             // avoiding flickering of corners
-            if (realNeighbs.size() < 3) island = false;
+            if (realNeighbs.size() < 4) island = false;
             if (island) {
                 cell->shouldRefine = true;
                 cell->shouldCoarsen = false;
-            } else if (mass < densCoarseThresh*maxDensity) {
+            } else if (density < densCoarseThresh*maxDensity) {
                 cell->shouldRefine = false;
                 cell->shouldCoarsen = true;
-            } else if (mass > densRefineThresh*maxDensity) {
+            } else if (density > densRefineThresh*maxDensity) {
                 cell->shouldRefine = true;
                 cell->shouldCoarsen = false;
             }
@@ -1408,7 +1436,7 @@ class FluidGrid {
             // dt = 0.9 * dt + 0.1 * new_dt; 
             maxV = 0;
             auto start = std::chrono::steady_clock::now();
-            solveGravPotential(3);
+            solveGravPotential(10);
             auto grav = std::chrono::steady_clock::now();
             updateVelocities();
             auto vel = std::chrono::steady_clock::now();
@@ -1426,7 +1454,7 @@ class FluidGrid {
             updateLeafCells();
             auto leaf = std::chrono::steady_clock::now();
 
-            std::cout << totMass << std::endl;
+            // std::cout << totMass << std::endl;
             // std::cout << "grav: ";
             // std::cout << std::chrono::duration_cast<std::chrono::microseconds>(grav - start).count() << "\n";
             // std::cout << "vel: ";
@@ -1459,10 +1487,10 @@ class FluidGrid {
         int minDepth = 3;
         // gradient thresh
         float coarseThresh = 0.1; 
-        float refineThresh = 1;
+        float refineThresh = 0.5;
         // density threshold
         float densCoarseThresh = 0.01;
-        float densRefineThresh = 0.8;
+        float densRefineThresh = 0.5;
         double width, height;
         double maxV;
         double minSize; // minimum side length
@@ -1528,11 +1556,11 @@ class Simulator {
 
                 SDL_Rect rect{(int)(xyBL.x/SCALE_W), (int)(consts::GRID_HEIGHT - ((xyBL.y+cellHeight)/SCALE_H)), (int)(cellWidth/SCALE_W)+1, (int)(cellHeight/SCALE_H)+1};
                 if (density > thisMaxDensity) thisMaxDensity = density;
-                if (density > maxDensity) density = maxDensity;
+                // if (density > maxDensity) density = maxDensity;
                 if (pressure > thisMaxPressure) {
                     thisMaxPressure = pressure;
                 }
-                if (temperature > thisMaxTemperature) {
+                if (temperature > thisMaxTemperature && density > 1e-2*maxDensity) {
                     thisMaxTemperature = temperature;
                 }
                 if (gravPotential < thisMinGP) thisMinGP = gravPotential;
@@ -1549,7 +1577,7 @@ class Simulator {
                 } else if (densityDisplay) {                    
                     double scaled_dens = std::sqrt(density/maxDensity) * 255;
                     if (scaled_dens > 255) scaled_dens = 255;
-                    SDL_SetRenderDrawColor(renderer, scaled_dens, scaled_dens*(1-Y), 0, 255);
+                    SDL_SetRenderDrawColor(renderer, scaled_dens, scaled_dens*(1-Y-Z), 0, 255);
                     // SDL_RenderFillRect(renderer, &rect);
                 } else if (temperatureDisplay) {
                     double scaled_temp = std::min(maxBit,temperature/maxTemperature * 255);
