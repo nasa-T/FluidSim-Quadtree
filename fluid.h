@@ -14,7 +14,7 @@ namespace consts {
     const double h = 6.626e-34;
     const double r = kb*Na;
     const double QH_He = 4.3e-12;
-    const double QHe_C = 7.275e17;
+    const double QHe_C = 1.17e-12;
     const double c = 2.998e8;
     const double mH = 1.67e-27;
     
@@ -187,14 +187,14 @@ double coolingFunction(double rho, double T, double Z) {
 double fusionRateH(double rho, double T, double X) {
     const double epsilon0 = 1.07e-19; // J m^3 kg^-2 s^-1
     double T6 = T / 1e6; // Temperature in millions of Kelvin
-    if (T6 < 1) return 0; // No fusion below 1 million K
+    if (T6 < 4 || rho < 50) return 0; // No fusion below 1 million K
     return epsilon0 * rho * X * X * pow(T6, 4);
 }
 
 double fusionRateHe(double rho, double T, double Y) {
     const double epsilon0 = 5.1e8; // J m^3 kg^-2 s^-1
     double T8 = T / 1e8; // Temperature in hundreds of millions of Kelvin
-    if (T8 < 1) return 0; // No fusion below 1 million K
+    if (T8 < 1 || rho < 50) return 0; // No fusion below 1 million K
     return epsilon0 * rho * rho * Y * Y * Y * pow(T8, -3) * exp(-44.42/T8);
 }
 
