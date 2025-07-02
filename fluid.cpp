@@ -475,14 +475,14 @@ class FluidGrid {
                 xyPos xy = getXY(cell->depth,cell->index);
                 double radius = pow(width*height,0.5)/2.6;
                 double dist = pow(pow(width/2-xy.x,2) + pow(height/2-xy.y,2),0.5);
-                double Tc = 1e7;
+                double Tc = 1e3;
                 // double Tc = 1e8;
-                long double mc = 1e22;
+                long double mc = 1e19;
                 // mass = dist < radius ? pow(1-dist/radius,3)*1e24/numCells : 1e18/numCells;
-                mass = dist < radius ? std::sin(consts::PI/2 * dist/radius)/(consts::PI *dist/radius) * mc/numCells : 1e15/numCells;
+                mass = dist < radius ? std::sin(consts::PI/2 * dist/radius)/(consts::PI *dist/radius) * mc/numCells : 0/numCells;
                 // temp = dist < radius ? pow(1-dist/radius,3)*1e6 : 10;
                 // temp = dist < radius ? std::cos(consts::PI/2 * dist / (radius*1.5)) / (consts::PI * dist / (radius*1.5)) * 1e5 : 10;
-                temp = dist < radius ? std::sin(consts::PI/2 * dist / radius) / (consts::PI * dist / radius) * Tc : 100;
+                temp = dist < radius ? std::sin(consts::PI/2 * dist / radius) / (consts::PI * dist / radius) * Tc : 0;
                 // temp = 1e6;
                 if (dist == 0) {
                     mass = mc/numCells;
@@ -941,8 +941,11 @@ class FluidGrid {
         void energyUpdate() {
             for (int i = 0; i < leafCells.size(); i++) {
                 FluidCell *cell = leafCells[i];
-                if (cell->getDensity() < 1e-4*maxDensity) {
-                    continue;
+                float energyReduction = 1;
+                if (cell->getDensity() < 1) {
+                    // energyReduction = cell->getDensity()/maxDensity;
+                    // energyReduction = 1e-5;
+                    // continue;
                 }
                 FluidCell *cellT = cell->getTop();
                 FluidCell *cellB = cell->getBottom();
@@ -1031,13 +1034,13 @@ class FluidGrid {
                 if (dX > 1) fusionEnergy = consts::QH_He * density;
                 if (dY > 1) fusionHeEnergy = consts::QHe_C * density;
 
-                E += fusionEnergy+fusionHeEnergy;
+                E += energyReduction*(fusionEnergy+fusionHeEnergy);
 
                 // pressure-work term
                 double div = (vR.getVx()-vL.getVx())/(distR+distL) + (vT.getVy()-vB.getVy())/(distT+distB);
                 double pdiv = pressure * div;
                 if (E - pdiv * getdt() >= 0) {
-                    E += -pdiv * getdt();
+                    E += energyReduction*(-pdiv * getdt());
                 } else {
                     // std::cerr << "Warning: Pressure work term causing negative energy.\n";
                     E = 0.0f; // Prevent negative energy
@@ -1047,7 +1050,7 @@ class FluidGrid {
                 double T = cell->getTemp(false);
                 double Z = cell->getZ();
                 double lambda = coolingFunction(density,T,Z);
-                if (E + lambda * getdt() >= 0) {
+                if (E - lambda * getdt() >= 0) {
                     E += -lambda*getdt();
                 } else {
                     E = 0.0f;
@@ -1061,7 +1064,7 @@ class FluidGrid {
                 double gx = -(gravR-gravL)/(distR+distL);
                 double gravWork = (cell->getVelocity().getVx()*gx+cell->getVelocity().getVy()*gy)*density;
                 if (E + gravWork * getdt() >= 0) {
-                    E += gravWork * getdt();
+                    E += energyReduction*(gravWork * getdt());
                 } else {
                     // std::cerr << "Warning: Gravitational work term causing negative energy.\n";
                     E = 0.0f; // Prevent negative energy
@@ -1069,7 +1072,7 @@ class FluidGrid {
                 // std::cout << "E: " << E << std::endl;
                 // std::cout << "E: " << cell->getE(false) << std::endl;
 
-                E += radiativeTransfer(cell)*getdt();
+                // E += energyReduction*(radiativeTransfer(cell)*getdt());
 
                 cell->setE(E);
                 
@@ -1100,6 +1103,12 @@ class FluidGrid {
             double tempL = cellL->getTemp(false);
             double tempR = cellR->getTemp(false);
 
+            double E = cell->getE(false);
+            double ET = cellT->getE(false);
+            double EB = cellB->getE(false);
+            double EL = cellL->getE(false);
+            double ER = cellR->getE(false);
+
             double distT = (cell->getHeight()/2 + cellT->getHeight()/2);
             double distB = (cell->getHeight()/2 + cellB->getHeight()/2);
             double distL = (cell->getWidth()/2 + cellL->getWidth()/2);
@@ -1110,6 +1119,7 @@ class FluidGrid {
             if (cellT->hasChildren()) {
                 densityT = (cellT->sw->getDensity() + cellT->se->getDensity())/2;
                 tempT = (cellT->sw->getTemp(false) + cellT->se->getTemp(false))/2;
+                ET = (cellT->sw->getE(false) + cellT->se->getE(false))/2;
                 XT = (cellT->sw->getX() + cellT->se->getX())/2;
                 distT = (cell->getHeight()/2 + cellT->sw->getHeight()/2);
             }
@@ -1117,6 +1127,7 @@ class FluidGrid {
             if (cellB->hasChildren()) {
                 densityB = (cellB->nw->getDensity() + cellB->ne->getDensity())/2;
                 tempB = (cellB->nw->getTemp(false) + cellB->ne->getTemp(false))/2;
+                EB = (cellB->nw->getE(false) + cellB->ne->getE(false))/2;
                 XB = (cellB->nw->getX() + cellB->ne->getX())/2;
                 distB = (cell->getHeight()/2 + cellB->nw->getHeight()/2);
             }
@@ -1124,6 +1135,7 @@ class FluidGrid {
             if (cellL->hasChildren()) {
                 densityL = (cellL->ne->getDensity() + cellL->se->getDensity())/2;
                 tempL = (cellL->ne->getTemp(false) + cellL->se->getTemp(false))/2;
+                EL = (cellL->ne->getE(false) + cellL->se->getE(false))/2;
                 XL = (cellL->ne->getX() + cellL->se->getX())/2;
                 distL = (cell->getWidth()/2 + cellL->ne->getWidth()/2);
             }
@@ -1131,19 +1143,37 @@ class FluidGrid {
             if (cellR->hasChildren()) {
                 densityR = (cellR->nw->getDensity() + cellR->sw->getDensity())/2;
                 tempR = (cellR->nw->getTemp(false) + cellR->sw->getTemp(false))/2;
+                ER = (cellR->nw->getE(false) + cellR->sw->getE(false))/2;
                 XR = (cellR->nw->getX() + cellR->sw->getX())/2;
                 distR = (cell->getWidth()/2 + cellR->nw->getWidth()/2);
             } 
 
             long double D, Dr, Dl, Dt, Db, Dr2, Dl2, Dt2, Db2;
+            double kap, kapR, kapL, kapT, kapB, tau, tauR, tauL, tauT, tauB;
+
+            kap = opacity(density,temp,X);
+            kapR = opacity(densityR,tempR,XR);
+            kapL = opacity(densityL,tempL,XL);
+            kapT = opacity(densityT,tempT,XT);
+            kapB = opacity(densityB,tempB,XB);
+            tau = opticalDepth(kap,density,cell->getWidth());
+            tauR = opticalDepth(kapR,densityR,cellR->getWidth());
+            tauL = opticalDepth(kapL,densityL,cellL->getWidth());
+            tauT = opticalDepth(kapT,densityT,cellT->getHeight());
+            tauB = opticalDepth(kapB,densityB,cellB->getHeight());
+
+            // double gradE = std::sqrt( pow((ER-EL)/(distR+distL),2) + pow((ET-EB)/(distT+distB),2) );
+
+            // double R = gradE/(kap*density*E);
+            // double lam = 1/R * (1/std::tanh(R) - 1/R);
 
             // cell-centered D
-            D = 4/3*consts::a*consts::c*pow(temp,3)/(opacity(density,temp,X)*density);
-            Dr = 4/3*consts::a*consts::c*pow(tempR,3)/(opacity(densityR,tempR,XR)*densityR);
-            Dl = 4/3*consts::a*consts::c*pow(tempL,3)/(opacity(densityL,tempL,XL)*densityL);
-            Dt = 4/3*consts::a*consts::c*pow(tempT,3)/(opacity(densityT,tempT,XT)*densityT);
-            Db = 4/3*consts::a*consts::c*pow(tempB,3)/(opacity(densityB,tempB,XB)*densityB);
-
+            D = (4/3*consts::a*consts::c*pow(temp,3)/(kap*density))/(1+pow(tau,-2));
+            Dr = (4/3*consts::a*consts::c*pow(tempR,3)/(kapR*densityR))/(1+pow(tauR,-2));
+            Dl = (4/3*consts::a*consts::c*pow(tempL,3)/(kapL*densityL))/(1+pow(tauL,-2));
+            Dt = (4/3*consts::a*consts::c*pow(tempT,3)/(kapT*densityT))/(1+pow(tauT,-2));
+            Db = (4/3*consts::a*consts::c*pow(tempB,3)/(kapB*densityB))/(1+pow(tauB,-2));
+            
             // D at bounds with inverse distance-weighted averages
             Dr2 = ((distR - cell->getWidth()/2) * D + cell->getWidth()/2 * Dr) / distR;
             Dl2 = ((distL - cell->getWidth()/2) * D + cell->getWidth()/2 * Dl) / distL;
@@ -1153,6 +1183,20 @@ class FluidGrid {
             long double dEx = (Dr2*(tempR-temp)/distR - Dl2*(temp-tempL)/distL)/cell->getWidth();
             long double dEy = (Dt2*(tempT-temp)/distT - Db2*(temp-tempB)/distB)/cell->getHeight();
             long double dE = dEx + dEy;
+
+            if (dE*getdt() > 1e15) {
+                printID(getID(cell->depth, cell->index));
+                std::cout << " " << opacity(density,temp,X) << " " << density << " " << densityB << " " << D << " " << Dt2 << " " << Db << " " << tauB << "\n T: " << temp << " " << tempT << " " << tempB << " dE:" << dE*getdt() << " dEx,dEy: " << dEx << "," << dEy << std::endl;
+            } else {
+                // std::cout << opacity(density,temp,X) << " " << density << " " << D << " " << Dt2 << " " << Db << " " << tauB << "\n T: " << temp << " " << tempT << " " << tempB << " dE:" << dE*getdt() << " dEx,dEy: " << dEx << "," << dEy << std::endl;
+            }
+            
+            if (getID(cell->depth, cell->index) == getID(7, 0x0908)) {
+                // std::cout << opacity(density,temp,X) << " rho: " << density << " D: " << D << " T: " << temp << " dE: " << dE*getdt() << " dEx,dEy: " << dEx << "," << dEy << std::endl;
+            }
+            if (!std::isfinite(dE)) {
+                // std::cout << opacity(density,temp,X) << " " << density << " " << D << " T: " << temp << " dE:" << dE*getdt() << " " << getdt() << std::endl;
+            }
 
             return dE;
 
@@ -1176,6 +1220,7 @@ class FluidGrid {
                     maxV = std::max(abs(vC.getVx()),abs(vC.getVy()));
                 }
                 if (cell->getHeight() == minSize || cell->getWidth() == minSize) minSizeSmall = false;
+
                 long double massFluxR = 0;
                 long double massFluxL = 0;
                 long double massFluxT = 0;
@@ -1409,12 +1454,6 @@ class FluidGrid {
                 cell->sete(cell->getE(false) - 0.5*cell->getDensity()*cell->getVelocity().getMag()*cell->getVelocity().getMag());
                 cell->getTemp(true);
                 cell->getPressure(true);
-                // std::cout << cell->gete(false) << std::endl;
-                if (getID(cell->depth,cell->index) == getID(7,0x301)) {
-
-                    std::cout << cell->getX() << " " << cell->getY() << " " << cell->getZ() << std::endl;
-                }
-                
             }
         }
 
@@ -1707,7 +1746,7 @@ class Simulator {
                 if (pressure > thisMaxPressure) {
                     thisMaxPressure = pressure;
                 }
-                if (temperature > thisMaxTemperature && density > 1e-3*maxDensity) {
+                if (temperature > thisMaxTemperature && density > 0.01*maxDensity) {
                     thisMaxTemperature = temperature;
                 }
                 if (gravPotential < thisMinGP) thisMinGP = gravPotential;
@@ -1729,7 +1768,7 @@ class Simulator {
                     // SDL_RenderFillRect(renderer, &rect);
                 } else if (temperatureDisplay) {
                     double scaled_temp = std::min(maxBit,temperature/maxTemperature * 255);
-                    if (density < 1e-3*maxDensity) scaled_temp = 0;
+                    if (density < 0.01*maxDensity) scaled_temp = 0;
                     SDL_SetRenderDrawColor(renderer, 0, scaled_temp, 0, 255);
                 } else if (gravPotentialDisplay) {
                     double scaled_pot = std::max(zero,std::min(maxBit,gravPotential/minGP * 255));
@@ -1846,6 +1885,7 @@ class Simulator {
                         ZDisplay = 0;
                         fusionDisplay = 0;
                         degenerateDisplay = 0;
+                        std::cout << "max internal energy: " << maxe << std::endl;
                         break;
                     case SDLK_7:
                         densityDisplay = 0;

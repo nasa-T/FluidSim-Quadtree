@@ -190,7 +190,7 @@ double fusionRateH(double rho, double T, double X) {
     const double epsilon0 = 1.07e-19; // J m^3 kg^-2 s^-1
     double T6 = T / 1e6; // Temperature in millions of Kelvin
     if (T6 < 4 || rho < 50) return 0; // No fusion below 1 million K
-    return epsilon0 * rho * X * X * pow(T6, 4);
+    return epsilon0 * rho * rho * X * X * pow(T6, 4);
 }
 
 double fusionRateHe(double rho, double T, double Y) {
@@ -202,6 +202,11 @@ double fusionRateHe(double rho, double T, double Y) {
 
 double opacity(double rho, double T, float X) {
     return 0.02 * (1.0 + X) + 4.34e21 * rho * pow(T, -3.5);
+}
+
+float opticalDepth(double kap, double rho, double width) {
+    return kap*rho;
+    // *width;
 }
 
 struct TreeLoc {
