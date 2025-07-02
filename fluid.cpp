@@ -359,6 +359,10 @@ class FluidCell {
             ne->setE(E);
             sw->setE(E);
             se->setE(E);
+            nw->setFusionEnergy(fusionE);
+            ne->setFusionEnergy(fusionE);
+            sw->setFusionEnergy(fusionE);
+            se->setFusionEnergy(fusionE);
 
         }
 
@@ -376,32 +380,38 @@ class FluidCell {
             long double totMass = 0; 
             long double tote = 0;
             long double totE = 0;
+            long double totFusE = 0;
             long double avgX = 0;
             long double avgY = 0;
             double avgTemp = 0;
             double avgPressure = 0;
             double avgGravPotential = 0;
+
             for (int i = 0; i < 4; i++) {
                 totMass += children[i]->getMass();
                 tote += children[i]->gete(false);
                 totE += children[i]->getE(false);
+                totFusE += children[i]->getFusionEnergy()*children[i]->getMass();
                 avgTemp += children[i]->getTemp(false);
                 avgPressure += children[i]->getPressure(false);
                 avgGravPotential += children[i]->getGravPotential();
                 avgX += children[i]->getX()*children[i]->getMass();
                 avgY += children[i]->getY()*children[i]->getMass();
             }
+
             avgTemp /= 4;
             avgPressure /= 4;
             avgGravPotential /= 4;
             tote /= 4;
             totE /= 4;
+            totFusE /= 4;
             avgX /= totMass;
             avgY /= totMass;
 
             setMass(totMass);
             sete(tote);
             setE(totE);
+            setFusionEnergy(totFusE);
             setTemp(avgTemp);
             setPressure(avgPressure);
             setGravPotential(avgGravPotential);
@@ -1013,9 +1023,9 @@ class FluidGrid {
                 cell->setFusionEnergy((fusionEnergy+fusionHeEnergy)/getdt());
 
                 // Update hydrogen and helium abundances
-                double dX = fusionEnergy / (consts::QH_He * density);
+                double dX = std::min((double)1.0,fusionEnergy / (consts::QH_He * density));
                 cell->HtoHe(dX);
-                double dY = fusionHeEnergy / (consts::QHe_C * density);
+                double dY = std::min((double)1.0,fusionHeEnergy / (consts::QHe_C * density));
                 cell->HetoZ(dY);
 
                 if (dX > 1) fusionEnergy = consts::QH_He * density;
@@ -1058,9 +1068,94 @@ class FluidGrid {
                 }
                 // std::cout << "E: " << E << std::endl;
                 // std::cout << "E: " << cell->getE(false) << std::endl;
+
+                E += radiativeTransfer(cell)*getdt();
+
                 cell->setE(E);
                 
             }
+        }
+
+        long double radiativeTransfer(FluidCell *cell) {
+            FluidCell *cellT = cell->getTop();
+            FluidCell *cellB = cell->getBottom();
+            FluidCell *cellL = cell->getLeft();
+            FluidCell *cellR = cell->getRight();
+
+            double density = cell->getDensity();
+            double densityT = cellT->getDensity();
+            double densityB = cellB->getDensity();
+            double densityL = cellL->getDensity();
+            double densityR = cellR->getDensity();
+
+            double X = cell->getX();
+            double XT = cellT->getX();
+            double XB = cellB->getX();
+            double XL = cellL->getX();
+            double XR = cellR->getX();
+
+            double temp = cell->getTemp(false);
+            double tempT = cellT->getTemp(false);
+            double tempB = cellB->getTemp(false);
+            double tempL = cellL->getTemp(false);
+            double tempR = cellR->getTemp(false);
+
+            double distT = (cell->getHeight()/2 + cellT->getHeight()/2);
+            double distB = (cell->getHeight()/2 + cellB->getHeight()/2);
+            double distL = (cell->getWidth()/2 + cellL->getWidth()/2);
+            double distR = (cell->getWidth()/2 + cellR->getWidth()/2);
+
+
+
+            if (cellT->hasChildren()) {
+                densityT = (cellT->sw->getDensity() + cellT->se->getDensity())/2;
+                tempT = (cellT->sw->getTemp(false) + cellT->se->getTemp(false))/2;
+                XT = (cellT->sw->getX() + cellT->se->getX())/2;
+                distT = (cell->getHeight()/2 + cellT->sw->getHeight()/2);
+            }
+
+            if (cellB->hasChildren()) {
+                densityB = (cellB->nw->getDensity() + cellB->ne->getDensity())/2;
+                tempB = (cellB->nw->getTemp(false) + cellB->ne->getTemp(false))/2;
+                XB = (cellB->nw->getX() + cellB->ne->getX())/2;
+                distB = (cell->getHeight()/2 + cellB->nw->getHeight()/2);
+            }
+
+            if (cellL->hasChildren()) {
+                densityL = (cellL->ne->getDensity() + cellL->se->getDensity())/2;
+                tempL = (cellL->ne->getTemp(false) + cellL->se->getTemp(false))/2;
+                XL = (cellL->ne->getX() + cellL->se->getX())/2;
+                distL = (cell->getWidth()/2 + cellL->ne->getWidth()/2);
+            }
+
+            if (cellR->hasChildren()) {
+                densityR = (cellR->nw->getDensity() + cellR->sw->getDensity())/2;
+                tempR = (cellR->nw->getTemp(false) + cellR->sw->getTemp(false))/2;
+                XR = (cellR->nw->getX() + cellR->sw->getX())/2;
+                distR = (cell->getWidth()/2 + cellR->nw->getWidth()/2);
+            } 
+
+            long double D, Dr, Dl, Dt, Db, Dr2, Dl2, Dt2, Db2;
+
+            // cell-centered D
+            D = 4/3*consts::a*consts::c*pow(temp,3)/(opacity(density,temp,X)*density);
+            Dr = 4/3*consts::a*consts::c*pow(tempR,3)/(opacity(densityR,tempR,XR)*densityR);
+            Dl = 4/3*consts::a*consts::c*pow(tempL,3)/(opacity(densityL,tempL,XL)*densityL);
+            Dt = 4/3*consts::a*consts::c*pow(tempT,3)/(opacity(densityT,tempT,XT)*densityT);
+            Db = 4/3*consts::a*consts::c*pow(tempB,3)/(opacity(densityB,tempB,XB)*densityB);
+
+            // D at bounds with inverse distance-weighted averages
+            Dr2 = ((distR - cell->getWidth()/2) * D + cell->getWidth()/2 * Dr) / distR;
+            Dl2 = ((distL - cell->getWidth()/2) * D + cell->getWidth()/2 * Dl) / distL;
+            Dt2 = ((distT - cell->getHeight()/2) * D + cell->getHeight()/2 * Dt) / distT;
+            Db2 = ((distB - cell->getHeight()/2) * D + cell->getHeight()/2 * Db) / distB;
+
+            long double dEx = (Dr2*(tempR-temp)/distR - Dl2*(temp-tempL)/distL)/cell->getWidth();
+            long double dEy = (Dt2*(tempT-temp)/distT - Db2*(temp-tempB)/distB)/cell->getHeight();
+            long double dE = dEx + dEy;
+
+            return dE;
+
         }
 
         void advect() {
@@ -1294,9 +1389,9 @@ class FluidGrid {
                 //     std::cout << " " << cell->getVelocity().getVx() << ", " << newVx*getdt()/cell->getWidth() << std::endl;
                 // }
                 cell->newVelocity = VelocityVector(newVx, newVy);
-                cell->newX = (mass*X - XFluxR + XFluxL - XFluxT + XFluxB)/cell->newMass;
-                cell->newY = (mass*Y - YFluxR + YFluxL - YFluxT + YFluxB)/cell->newMass;
-                cell->newZ = (mass*Z - ZFluxR + ZFluxL - ZFluxT + ZFluxB)/cell->newMass;
+                cell->newX = std::min(1.0f,std::max(0.0f,(float)((mass*X - XFluxR + XFluxL - XFluxT + XFluxB)/cell->newMass)) );
+                cell->newY = std::min(1.0f,std::max(0.0f,(float)((mass*Y - YFluxR + YFluxL - YFluxT + YFluxB)/cell->newMass)) );
+                cell->newZ = std::min(1.0f,std::max(0.0f,(float)((mass*Z - ZFluxR + ZFluxL - ZFluxT + ZFluxB)/cell->newMass)) );
             }
             maxDensity = thisMaxDensity;
             if (minSizeSmall) minSize *= 2;
@@ -1539,7 +1634,7 @@ class FluidGrid {
         int minDepth = 3;
         // gradient thresh
         float coarseThresh = 0.1; 
-        float refineThresh = 0.5;
+        float refineThresh = 0.2;
         // density threshold
         float densCoarseThresh = 0.01;
         float densRefineThresh = 0.5;

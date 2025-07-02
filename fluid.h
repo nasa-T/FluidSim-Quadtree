@@ -17,6 +17,8 @@ namespace consts {
     const double QHe_C = 1.17e-12;
     const double c = 2.998e8;
     const double mH = 1.67e-27;
+    const double sig_sb = 5.6704e-8;
+    const double a = 4*sig_sb/c;
     
     const double HCv = 10730;
 
@@ -196,6 +198,10 @@ double fusionRateHe(double rho, double T, double Y) {
     double T8 = T / 1e8; // Temperature in hundreds of millions of Kelvin
     if (T8 < 1 || rho < 50) return 0; // No fusion below 1 million K
     return epsilon0 * rho * rho * Y * Y * Y * pow(T8, -3) * exp(-44.42/T8);
+}
+
+double opacity(double rho, double T, float X) {
+    return 0.02 * (1.0 + X) + 4.34e21 * rho * pow(T, -3.5);
 }
 
 struct TreeLoc {
