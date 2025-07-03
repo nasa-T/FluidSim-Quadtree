@@ -189,14 +189,14 @@ double coolingFunction(double rho, double T, double Z) {
 double fusionRateH(double rho, double T, double X) {
     const double epsilon0 = 1.07e-19; // J m^3 kg^-2 s^-1
     double T6 = T / 1e6; // Temperature in millions of Kelvin
-    if (T6 < 4 || rho < 50) return 0; // No fusion below 1 million K
+    if (T6 < 4 || rho < 10) return 0; // No fusion below 1 million K
     return epsilon0 * rho * rho * X * X * pow(T6, 4);
 }
 
 double fusionRateHe(double rho, double T, double Y) {
     const double epsilon0 = 5.1e8; // J m^3 kg^-2 s^-1
     double T8 = T / 1e8; // Temperature in hundreds of millions of Kelvin
-    if (T8 < 1 || rho < 50) return 0; // No fusion below 1 million K
+    if (T8 < 1 || rho < 10) return 0; // No fusion below 1 million K
     return epsilon0 * rho * rho * Y * Y * Y * pow(T8, -3) * exp(-44.42/T8);
 }
 

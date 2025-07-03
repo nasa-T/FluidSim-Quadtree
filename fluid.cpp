@@ -23,6 +23,14 @@ class VelocityVector {
             VelocityVector divided(this->vx/d, this->vy/d, ax, ay);
             return divided;
         }
+        VelocityVector operator-(VelocityVector& other) {
+            VelocityVector subtracted(this->vx - other.vx, this->vy - other.vy, other.ax, other.ay);
+            return subtracted;
+        }
+        VelocityVector operator*(double d) {
+            VelocityVector divided(this->vx*d, this->vy*d, ax, ay);
+            return divided;
+        }
         double getVx() {
             return vx;
         }
@@ -473,11 +481,11 @@ class FluidGrid {
                 FluidCell *cell = leafCells[i];
                 // mass = (std::rand() % 100) * 1e16;
                 xyPos xy = getXY(cell->depth,cell->index);
-                double radius = pow(width*height,0.5)/2.6;
+                double radius = pow(width*height,0.5)/3;
                 double dist = pow(pow(width/2-xy.x,2) + pow(height/2-xy.y,2),0.5);
-                double Tc = 1e3;
+                double Tc = 1e6;
                 // double Tc = 1e8;
-                long double mc = 1e19;
+                long double mc = 1e21;
                 // mass = dist < radius ? pow(1-dist/radius,3)*1e24/numCells : 1e18/numCells;
                 mass = dist < radius ? std::sin(consts::PI/2 * dist/radius)/(consts::PI *dist/radius) * mc/numCells : 0/numCells;
                 // temp = dist < radius ? pow(1-dist/radius,3)*1e6 : 10;
@@ -625,14 +633,14 @@ class FluidGrid {
                 // } else if (leafDepth == origDepth + 1) {
                 //     return idToCell[nextID]->parent;
                 } else {
-                    std::cout << "dir: " << dir << std::endl;
-                    std::cout << "jumper: ";
-                    printID(nextID);
-                    std::cout << std::endl;
-                    std::cout << origDepth << " ";
-                    printID(origIndex);
-                    std::cout << std::endl;
-                    std::cerr << "Your neighbor has a jump in resolution, and we will not handle that for now. Returning a null pointer.\n";
+                    // std::cout << "dir: " << dir << std::endl;
+                    // std::cout << "jumper: ";
+                    // printID(nextID);
+                    // std::cout << std::endl;
+                    // std::cout << origDepth << " ";
+                    // printID(origIndex);
+                    // std::cout << std::endl;
+                    // std::cerr << "Your neighbor has a jump in resolution, and we will not handle that for now. Returning a null pointer.\n";
                     return nullptr;
                 }
                 
@@ -920,9 +928,12 @@ class FluidGrid {
                 double gradPy = (pressT - pressB)/(distT+distB);
                 double gradPx = (pressR - pressL)/(distL+distR);
                 VelocityVector v = cell->getVelocity();
-                if (cell->getDensity() > 0.00001*maxDensity && std::isfinite(newV.getVx()) && std::isfinite(newV.getVy())) {
-                    newV.setVx(v.getVx() + (-gradUx-gradPx/cell->getDensity())*getdt());
-                    newV.setVy(v.getVy() + (-gradUy-gradPy/cell->getDensity())*getdt());
+                if (cell->getDensity() > 0.00001*maxDensity) {
+                    VelocityVector diff = velDiffusion(cell);
+                    // newV.setVx(v.getVx() + (-gradUx-gradPx/cell->getDensity())*getdt());
+                    newV.setVx(v.getVx() + (-gradUx-gradPx/cell->getDensity() + diff.getVx()/cell->getDensity())*getdt());
+                    // newV.setVy(v.getVy() + (-gradUy-gradPy/cell->getDensity())*getdt());
+                    newV.setVy(v.getVy() + (-gradUy-gradPy/cell->getDensity() + diff.getVy()/cell->getDensity())*getdt());
                 } else {
                     newV.setVx(0);
                     newV.setVy(0);
@@ -936,6 +947,68 @@ class FluidGrid {
                 // }
                 // std::cout << "vel E: " << cell->gete(false) << std::endl;
             }
+        }
+
+        VelocityVector velDiffusion(FluidCell *cell) {
+            FluidCell *cellT = cell->getTop();
+            FluidCell *cellB = cell->getBottom();
+            FluidCell *cellL = cell->getLeft();
+            FluidCell *cellR = cell->getRight();
+            
+            double distT = (cell->getHeight()/2 + cellT->getHeight()/2);
+            double distB = (cell->getHeight()/2 + cellB->getHeight()/2);
+            double distL = (cell->getWidth()/2 + cellL->getWidth()/2);
+            double distR = (cell->getWidth()/2 + cellR->getWidth()/2);
+
+            VelocityVector v = cell->getVelocity();
+            VelocityVector vR = cellR->getVelocity();
+            VelocityVector vL = cellL->getVelocity();
+            VelocityVector vB = cellB->getVelocity();
+            VelocityVector vT = cellT->getVelocity();
+
+            VelocityVector l,r;
+
+            if (cellT->hasChildren()) {
+                // vT = (cellT->sw->getVelocity() + cellT->se->getVelocity())/2;
+                distT = (cell->getHeight()/2 + cellT->sw->getHeight()/2);
+                l = cellT->sw->getVelocity();
+                r = cellT->se->getVelocity();
+                vT = (l + r)/2;
+            }
+
+            if (cellB->hasChildren()) {
+                // vB = (cellB->nw->getVelocity() + cellB->ne->getVelocity())/2;
+                distB = (cell->getHeight()/2 + cellB->nw->getHeight()/2);
+                l = cellB->nw->getVelocity();
+                r = cellB->ne->getVelocity();
+                vB = (l + r)/2;
+            }
+
+            if (cellL->hasChildren()) {
+                // vL = (cellL->ne->getVelocity() + cellL->se->getVelocity())/2;
+                distL = (cell->getWidth()/2 + cellL->ne->getWidth()/2);
+                l = cellL->ne->getVelocity();
+                r = cellL->se->getVelocity();
+                vL = (l + r)/2;
+            }
+
+            if (cellR->hasChildren()) {
+                // vR = (cellR->nw->getVelocity() + cellR->sw->getVelocity())/2;
+                distR = (cell->getWidth()/2 + cellR->nw->getWidth()/2);
+                l = cellR->nw->getVelocity();
+                r = cellR->sw->getVelocity();
+                vR = (l + r)/2;
+            }
+
+            VelocityVector dvR2 = (vR - v) / distR;
+            VelocityVector dvL2 = (v - vL) / distL;
+            VelocityVector dvT2 = (vT - v) / distT;
+            VelocityVector dvB2 = (v - vB) / distB;
+            VelocityVector divX = (dvR2 - dvL2)/(distL+distR);
+            VelocityVector divY = (dvT2 - dvB2)/(distT+distB);
+
+            return std::isfinite((divX+divY).getVx()) && std::isfinite((divX+divY).getVy()) ? (divX + divY)*viscosity : VelocityVector(0,0);
+
         }
 
         void energyUpdate() {
@@ -1284,7 +1357,7 @@ class FluidGrid {
                             massR = children[i]->getMass();
                             ER = children[i]->getE(false);
                             massFluxR += vxR > 0 ? mass*vxR*getdt()*children[i]->getHeight()/cell->getSize() : massR*vxR*getdt()*children[i]->getHeight()/children[i]->getSize();
-                            EFluxR += vxR > 0 ? E*vxR*getdt()*children[i]->getHeight()/cell->getSize() : ER*vxR*getdt()*children[i]->getHeight()/children[i]->getSize();
+                            EFluxR += vxR > 0 ? cell->getSize()*E*vxR*getdt()*children[i]->getHeight()/cell->getSize() : children[i]->getSize()*ER*vxR*getdt()*children[i]->getHeight()/children[i]->getSize();
                             vxFluxR += vxR > 0 ? mass*cell->getVelocity().getVx()*vxR*getdt()*children[i]->getHeight()/cell->getSize() : massR*children[i]->getVelocity().getVx()*vxR*getdt()*children[i]->getHeight()/children[i]->getSize();
                             XFluxR += vxR > 0 ? mass*X*vxR*getdt()*children[i]->getHeight()/cell->getSize() : massR*children[i]->getX()*vxR*getdt()*children[i]->getHeight()/children[i]->getSize();
                             YFluxR += vxR > 0 ? mass*Y*vxR*getdt()*children[i]->getHeight()/cell->getSize() : massR*children[i]->getY()*vxR*getdt()*children[i]->getHeight()/children[i]->getSize();
@@ -1295,7 +1368,7 @@ class FluidGrid {
                         massR = cellR->getMass();
                         ER = cellR->getE(false);
                         massFluxR = vxR > 0 ? mass*vxR*getdt()*cell->getHeight()/cell->getSize() : massR*vxR*getdt()*cell->getHeight()/cellR->getSize();
-                        EFluxR = vxR > 0 ? E*vxR*getdt()*cell->getHeight()/cell->getSize() : ER*vxR*getdt()*cell->getHeight()/cellR->getSize();
+                        EFluxR = vxR > 0 ? cell->getSize()*E*vxR*getdt()*cell->getHeight()/cell->getSize() : cellR->getSize()*ER*vxR*getdt()*cell->getHeight()/cellR->getSize();
                         vxFluxR = vxR > 0 ? mass*cell->getVelocity().getVx()*vxR*getdt()*cell->getHeight()/cell->getSize() : massR*cellR->getVelocity().getVx()*vxR*getdt()*cell->getHeight()/cellR->getSize();
                         XFluxR = vxR > 0 ? mass*X*vxR*getdt()*cellR->getHeight()/cell->getSize() : massL*cellR->getX()*vxR*getdt()*cellL->getHeight()/cellL->getSize();
                         YFluxR = vxR > 0 ? mass*Y*vxR*getdt()*cellR->getHeight()/cell->getSize() : massR*cellR->getY()*vxR*getdt()*cellR->getHeight()/cellR->getSize();
@@ -1313,7 +1386,7 @@ class FluidGrid {
                             massL = children[i]->getMass();
                             EL = children[i]->getE(false);
                             massFluxL += vxL < 0 ? mass*vxL*getdt()*children[i]->getHeight()/cell->getSize() : massL*vxL*getdt()*children[i]->getHeight()/children[i]->getSize();
-                            EFluxL += vxL < 0 ? E*vxL*getdt()*children[i]->getHeight()/cell->getSize() : EL*vxL*getdt()*children[i]->getHeight()/children[i]->getSize();
+                            EFluxL += vxL < 0 ? cell->getSize()*E*vxL*getdt()*children[i]->getHeight()/cell->getSize() : children[i]->getSize()*EL*vxL*getdt()*children[i]->getHeight()/children[i]->getSize();
                             vxFluxL += vxL < 0 ? mass*cell->getVelocity().getVx()*vxL*getdt()*children[i]->getHeight()/cell->getSize() : massL*children[i]->getVelocity().getVx()*vxL*getdt()*children[i]->getHeight()/children[i]->getSize();
                             XFluxL += vxL < 0 ? mass*X*vxL*getdt()*children[i]->getHeight()/cell->getSize() : massL*children[i]->getX()*vxL*getdt()*children[i]->getHeight()/children[i]->getSize();
                             YFluxL += vxL < 0 ? mass*Y*vxL*getdt()*children[i]->getHeight()/cell->getSize() : massL*children[i]->getY()*vxL*getdt()*children[i]->getHeight()/children[i]->getSize();
@@ -1324,7 +1397,7 @@ class FluidGrid {
                         massL = cellL->getMass();
                         EL = cellL->getE(false);
                         massFluxL = vxL < 0 ? mass*vxL*getdt()*cell->getHeight()/cell->getSize() : massL*vxL*getdt()*cell->getHeight()/cellL->getSize();
-                        EFluxL = vxL < 0 ? E*vxL*getdt()*cell->getHeight()/cell->getSize() : EL*vxL*getdt()*cell->getHeight()/cellL->getSize();
+                        EFluxL = vxL < 0 ? cell->getSize()*E*vxL*getdt()*cell->getHeight()/cell->getSize() : cellL->getSize()*EL*vxL*getdt()*cell->getHeight()/cellL->getSize();
                         vxFluxL = vxL < 0 ? mass*cell->getVelocity().getVx()*vxL*getdt()*cell->getHeight()/cell->getSize() : massL*cellL->getVelocity().getVx()*vxL*getdt()*cell->getHeight()/cellL->getSize();
                         XFluxL = vxL < 0 ? mass*X*vxL*getdt()*cellL->getHeight()/cell->getSize() : massL*cellL->getX()*vxL*getdt()*cellL->getHeight()/cellL->getSize();
                         YFluxL = vxL < 0 ? mass*Y*vxL*getdt()*cellL->getHeight()/cell->getSize() : massL*cellL->getY()*vxL*getdt()*cellL->getHeight()/cellL->getSize();
@@ -1342,7 +1415,7 @@ class FluidGrid {
                             massT = children[i]->getMass();
                             ET = children[i]->getE(false);
                             massFluxT += vyT > 0 ? mass*vyT*getdt()*children[i]->getWidth()/cell->getSize() : massT*vyT*getdt()*children[i]->getWidth()/children[i]->getSize();
-                            EFluxT += vyT > 0 ? E*vyT*getdt()*children[i]->getWidth()/cell->getSize() : ET*vyT*getdt()*children[i]->getWidth()/children[i]->getSize();
+                            EFluxT += vyT > 0 ? cell->getSize()*E*vyT*getdt()*children[i]->getWidth()/cell->getSize() : children[i]->getSize()*ET*vyT*getdt()*children[i]->getWidth()/children[i]->getSize();
                             vyFluxT += vyT > 0 ? mass*cell->getVelocity().getVy()*vyT*getdt()*children[i]->getWidth()/cell->getSize() : massT*children[i]->getVelocity().getVy()*vyT*getdt()*children[i]->getWidth()/children[i]->getSize();
                             XFluxT += vyT > 0 ? mass*X*vyT*getdt()*children[i]->getWidth()/cell->getSize() : massT*children[i]->getX()*vyT*getdt()*children[i]->getWidth()/children[i]->getSize();
                             YFluxT += vyT > 0 ? mass*Y*vyT*getdt()*children[i]->getWidth()/cell->getSize() : massT*children[i]->getY()*vyT*getdt()*children[i]->getWidth()/children[i]->getSize();
@@ -1353,7 +1426,7 @@ class FluidGrid {
                         massT = cellT->getMass();
                         ET = cellT->getE(false);
                         massFluxT = vyT > 0 ? mass*vyT*getdt()*cell->getWidth()/cell->getSize() : massT*vyT*getdt()*cell->getWidth()/cellT->getSize();
-                        EFluxT = vyT > 0 ? E*vyT*getdt()*cell->getWidth()/cell->getSize() : ET*vyT*getdt()*cell->getWidth()/cellT->getSize();
+                        EFluxT = vyT > 0 ? cell->getSize()*E*vyT*getdt()*cell->getWidth()/cell->getSize() : cellT->getSize()*ET*vyT*getdt()*cell->getWidth()/cellT->getSize();
                         vyFluxT = vyT > 0 ? mass*cell->getVelocity().getVy()*vyT*getdt()*cell->getWidth()/cell->getSize() : massT*cellT->getVelocity().getVy()*vyT*getdt()*cell->getWidth()/cellT->getSize();
                         XFluxT = vyT > 0 ? mass*X*vyT*getdt()*cellT->getWidth()/cell->getSize() : massT*cellT->getX()*vyT*getdt()*cellT->getWidth()/cellT->getSize();
                         YFluxT = vyT > 0 ? mass*Y*vyT*getdt()*cellT->getWidth()/cell->getSize() : massT*cellT->getY()*vyT*getdt()*cellT->getWidth()/cellT->getSize();
@@ -1371,7 +1444,7 @@ class FluidGrid {
                             massB = children[i]->getMass();
                             EB = children[i]->getE(false);
                             massFluxB += vyB < 0 ? mass*vyB*getdt()*children[i]->getWidth()/cell->getSize() : massB*vyB*getdt()*children[i]->getWidth()/children[i]->getSize();
-                            EFluxB += vyB < 0 ? E*vyB*getdt()*children[i]->getWidth()/cell->getSize() : EB*vyB*getdt()*children[i]->getWidth()/children[i]->getSize();
+                            EFluxB += vyB < 0 ? cell->getSize()*E*vyB*getdt()*children[i]->getWidth()/cell->getSize() : children[i]->getSize()*EB*vyB*getdt()*children[i]->getWidth()/children[i]->getSize();
                             vyFluxB += vyB < 0 ? mass*cell->getVelocity().getVy()*vyB*getdt()*children[i]->getWidth()/cell->getSize() : massB*children[i]->getVelocity().getVy()*vyB*getdt()*children[i]->getWidth()/children[i]->getSize();
                             XFluxB += vyB < 0 ? mass*X*vyB*getdt()*children[i]->getWidth()/cell->getSize() : massB*children[i]->getX()*vyB*getdt()*children[i]->getWidth()/children[i]->getSize();
                             YFluxB += vyB < 0 ? mass*Y*vyB*getdt()*children[i]->getWidth()/cell->getSize() : massB*children[i]->getY()*vyB*getdt()*children[i]->getWidth()/children[i]->getSize();
@@ -1382,7 +1455,7 @@ class FluidGrid {
                         massB = cellB->getMass();
                         EB = cellB->getE(false);
                         massFluxB = vyB < 0 ? mass*vyB*getdt()*cell->getWidth()/cell->getSize() : massB*vyB*getdt()*cell->getWidth()/cellB->getSize();
-                        EFluxB = vyB < 0 ? E*vyB*getdt()*cell->getWidth()/cell->getSize() : EB*vyB*getdt()*cell->getWidth()/cellB->getSize();
+                        EFluxB = vyB < 0 ? cell->getSize()*E*vyB*getdt()*cell->getWidth()/cell->getSize() : cellB->getSize()*EB*vyB*getdt()*cell->getWidth()/cellB->getSize();
                         vyFluxB = vyB < 0 ? mass*cell->getVelocity().getVy()*vyB*getdt()*cell->getWidth()/cell->getSize() : massB*cellB->getVelocity().getVy()*vyB*getdt()*cell->getWidth()/cellB->getSize();
                         XFluxB = vyB < 0 ? mass*X*vyB*getdt()*cellB->getWidth()/cell->getSize() : massB*cellB->getX()*vyB*getdt()*cellB->getWidth()/cellB->getSize();
                         YFluxB = vyB < 0 ? mass*Y*vyB*getdt()*cellB->getWidth()/cell->getSize() : massB*cellB->getY()*vyB*getdt()*cellB->getWidth()/cellB->getSize();
@@ -1392,31 +1465,37 @@ class FluidGrid {
                         // }
                     }
                 }
-                // if (!std::isfinite(EFluxR)) {
-                //     EFluxR = 0;
-                //     // std::cout << vxR << ", " << massR << std::endl;
-                // }
-                // if (!std::isfinite(EFluxL)) {
-                //     EFluxL = 0;
-                //     // std::cout << vxL << ", " << massL << std::endl;
-                // }
-                // if (!std::isfinite(EFluxT)) {
-                //     EFluxT = 0;
-                //     // std::cout << vyT << ", " << massT << std::endl;
-                // }
-                // if (!std::isfinite(EFluxB)) {
-                //     EFluxB = 0;
-                //     // std::cout << vyB << ", " << massB << std::endl;
-                // }
+
+                if (getID(7,0x2542) == getID(cell->depth, cell->index)) {
+                    std::cout << "mR: " << massFluxR/massR << " mB: " << massFluxB/massB << " vxR: " << vxR << " vyB: " << vyB  << "\n";
+                }
+
+                if (!std::isfinite(EFluxR)) {
+                    EFluxR = 0;
+                    // std::cout << vxR << ", " << massR << std::endl;
+                }
+                if (!std::isfinite(EFluxL)) {
+                    EFluxL = 0;
+                    // std::cout << vxL << ", " << massL << std::endl;
+                }
+                if (!std::isfinite(EFluxT)) {
+                    EFluxT = 0;
+                    // std::cout << vyT << ", " << massT << std::endl;
+                }
+                if (!std::isfinite(EFluxB)) {
+                    EFluxB = 0;
+                    // std::cout << vyB << ", " << massB << std::endl;
+                }
                 // setAMR(cell);
                 cell->newMass = cell->getMass() - massFluxR + massFluxL - massFluxT + massFluxB;
-                cell->newE = E - EFluxR + EFluxL - EFluxT + EFluxB;
-                if (!std::isfinite(cell->newE)) {
-                    std::cout << "nan: " << EFluxR << ", " << EFluxL << ", " << EFluxT << ", " <<  EFluxB << std::endl;
-                    printID(getID(cell->depth, cell->index));
-                    std::cout << std::endl;
-                    cell->newE = cell->getE(false);
-                }
+                cell->newE = E + (- EFluxR + EFluxL - EFluxT + EFluxB)/cell->getSize();
+                // if (!std::isfinite(cell->newE)) {
+                //     std::cout << "nan: " << EFluxR << ", " << EFluxL << ", " << EFluxT << ", " <<  EFluxB << std::endl;
+                //     std::cout << cell->depth << " ";
+                //     printID(cell->index);
+                //     std::cout << std::endl;
+                //     cell->newE = cell->getE(false);
+                // }
                 // std::cout << "E " << E << ", newE " << cell->newE << std::endl;
                 double newVx = (mass*cell->getVelocity().getVx() + -vxFluxR + vxFluxL)/cell->newMass;
                 if (abs(newVx*getdt()/cell->getWidth()) > 1) {
@@ -1613,8 +1692,8 @@ class FluidGrid {
 
         void update() {
             double new_dt = 0.7*minSize / maxV;
-            dt = std::max(std::min(new_dt, dt*1.25),1.0);
-            // std::cout << maxV << ", " << dt << std::endl; 
+            dt = std::min(new_dt, dt*1.05);
+            std::cout << maxV << ", " << dt << std::endl; 
             // dt = 0.9 * dt + 0.1 * new_dt; 
             maxV = 0;
             auto start = std::chrono::steady_clock::now();
@@ -1627,9 +1706,12 @@ class FluidGrid {
             advect();
             auto adv = std::chrono::steady_clock::now();
             // std::cout << "\r" << totMass << std::endl;
+            // tote = 0;
             for (int i = 0; i < leafCells.size(); i++) {
+                // tote += leafCells[i]->getE(false)*leafCells[i]->getSize();
                 setAMR(leafCells[i]);
             }
+            // std::cout << "\r" << tote << std::endl;
             auto setamr = std::chrono::steady_clock::now();
             checkAMR();
             auto amr = std::chrono::steady_clock::now();
@@ -1677,6 +1759,7 @@ class FluidGrid {
         // density threshold
         float densCoarseThresh = 0.01;
         float densRefineThresh = 0.5;
+        float viscosity = 0;
         double width, height;
         double maxV;
         double minSize; // minimum side length
@@ -1685,7 +1768,7 @@ class FluidGrid {
         std::map<uint64_t,FluidCell*> idToCell;
         std::vector<FluidCell*> leafCells;
         long double maxDensity;
-        long double totMass;
+        long double totMass, tote;
 };
 
 class Simulator {
@@ -1746,7 +1829,8 @@ class Simulator {
                 if (pressure > thisMaxPressure) {
                     thisMaxPressure = pressure;
                 }
-                if (temperature > thisMaxTemperature && density > 0.01*maxDensity) {
+                if (temperature > thisMaxTemperature ) {
+                    // && density > 0.01*maxDensity
                     thisMaxTemperature = temperature;
                 }
                 if (gravPotential < thisMinGP) thisMinGP = gravPotential;
@@ -1768,7 +1852,7 @@ class Simulator {
                     // SDL_RenderFillRect(renderer, &rect);
                 } else if (temperatureDisplay) {
                     double scaled_temp = std::min(maxBit,temperature/maxTemperature * 255);
-                    if (density < 0.01*maxDensity) scaled_temp = 0;
+                    // if (density < 0.01*maxDensity) scaled_temp = 0;
                     SDL_SetRenderDrawColor(renderer, 0, scaled_temp, 0, 255);
                 } else if (gravPotentialDisplay) {
                     double scaled_pot = std::max(zero,std::min(maxBit,gravPotential/minGP * 255));
@@ -2029,10 +2113,10 @@ int main(int argv, char **argc) {
     SDL_PollEvent(&event);
     while(!(event.type == SDL_QUIT)){
         SDL_PollEvent(&event);
-        // sim.drawCells();
-        // if (event.key.state == SDLK_SPACE) {
+        sim.drawCells();
+        if (event.key.state == SDLK_SPACE) {
             sim.step(event);
-        // }
+        }
         
     }
     sim.freeSim();
