@@ -46,28 +46,29 @@ namespace consts {
     
 }
 enum Direction {LEFT, RIGHT, UP, DOWN};
+enum Property {MASS, MOMENTUM, ENERGY, HYDROGEN, HELIUM, METALS};
 // cell properties
-const uint MASS = 0;
-const uint TEMPERATURE = 1;
-const uint PRESSURE = 2;
-const uint SMOKEMASS = 3;
-const uint E = 4;
-const uint R = 5;
-const uint G = 6;
-const uint B = 7;
-const uint GRAVITY = 8;
-const uint HYDROGEN = 9;
-const uint HELIUM = 10;
-// mouse modes
-const uint SMOKE = 0;
-const uint VELOCITY = 1;
-const uint SOURCE = 2;
-// source types
-const uint SMOKEGUN = 0;
-const uint POINTSOURCE = 1;
-const uint FAN = 2;
+// const uint MASS = 0;
+// const uint TEMPERATURE = 1;
+// const uint PRESSURE = 2;
+// const uint SMOKEMASS = 3;
+// const uint E = 4;
+// const uint R = 5;
+// const uint G = 6;
+// const uint B = 7;
+// const uint GRAVITY = 8;
+// const uint HYDROGEN = 9;
+// const uint HELIUM = 10;
+// // mouse modes
+// const uint SMOKE = 0;
+// const uint VELOCITY = 1;
+// const uint SOURCE = 2;
+// // source types
+// const uint SMOKEGUN = 0;
+// const uint POINTSOURCE = 1;
+// const uint FAN = 2;
 
-const uint MAXSOURCES = 10;
+// const uint MAXSOURCES = 10;
 
 struct position {
     public:
@@ -207,6 +208,31 @@ double opacity(double rho, double T, float X) {
 float opticalDepth(double kap, double rho, double width) {
     return kap*rho;
     // *width;
+}
+
+struct Arrow {
+    int startX;
+    int startY;
+    int dx;
+    int dy;
+    int endX = startX+dx;
+    int endY = startY+dy;
+};
+
+void drawArrow(SDL_Renderer *renderer, Arrow arrow) {
+    SDL_RenderDrawLine(renderer, arrow.startX, arrow.startY, arrow.endX, arrow.endY);
+    float theta;
+    if ((arrow.endX-arrow.startX) == 0) {
+        theta = arrow.dy > 0 ? consts::PI/2 : -consts::PI/2;
+    } else {
+        // theta = std::atan(arrow.dy/arrow.dx);
+        theta = std::atan2(arrow.dy,arrow.dx);
+        // if (arrow.dx < 0) theta = theta - consts::PI;
+    }
+    float phi = 30*consts::PI/180;
+    // float phi = 0.0f;
+    SDL_RenderDrawLine(renderer, arrow.endX, arrow.endY, arrow.endX-5*std::cos(theta+phi), arrow.endY-5*std::sin(theta+phi));
+    SDL_RenderDrawLine(renderer, arrow.endX, arrow.endY, arrow.endX-5*std::cos(theta-phi), arrow.endY-5*std::sin(theta-phi));
 }
 
 struct TreeLoc {
