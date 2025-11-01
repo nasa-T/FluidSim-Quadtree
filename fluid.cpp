@@ -1,5 +1,7 @@
 #include <cmath>
 #include <iostream>
+#include <sstream>
+#include <iomanip>
 #include <fstream>
 #include "fluid.h"
 
@@ -254,7 +256,7 @@ class FluidCell {
             } else {
                 e = 0;
                 // mass = 0;
-                E = 0;
+                // E = 0;
             }
         }
         
@@ -271,7 +273,7 @@ class FluidCell {
             } else {
                 E = 0;
                 // mass = 0;
-                e = 0;
+                // e = 0;
             }
         }
 
@@ -504,16 +506,32 @@ class FluidGrid {
                 // double Tc = 1e8;
                 long double mc = 1e22;
                 // mass = dist < radius ? pow(1-dist/radius,3)*1e24/numCells : 1e18/numCells;
-                mass = dist < radius ? std::sin(consts::PI/2 * dist/radius)/(consts::PI *dist/radius) * mc/numCells : 1e1/numCells;
+                mass = dist < radius ? std::sin(consts::PI/2 * dist/radius)/(consts::PI *dist/radius) * mc/numCells : 1e15/numCells;
                 // temp = dist < radius ? pow(1-dist/radius,3)*1e6 : 10;
                 // temp = dist < radius ? std::cos(consts::PI/2 * dist / (radius*1.5)) / (consts::PI * dist / (radius*1.5)) * 1e5 : 10;
-                temp = dist < radius ? std::sin(consts::PI/2 * dist / radius) / (consts::PI * dist / radius) * Tc : 100;
+                temp = dist < radius ? std::sin(consts::PI/2 * dist / radius) / (consts::PI * dist / radius) * Tc : 0;
                 // temp = 1e6;
-                if (dist == 0) {
-                    mass = mc/numCells;
-                    temp = Tc;
+
+                VelocityVector vel;
+                double xDist = xy.x - width/2;
+                double yDist = xy.y - height/2;
+                float angle = xDist > 0 ? std::atan(yDist/xDist) + consts::PI/2 : consts::PI+std::atan(yDist/xDist) + consts::PI/2;
+                double velMag = std::sqrt(2*consts::G*1e27/dist);
+                double vx = velMag*std::cos(angle);
+                double vy = velMag*std::sin(angle);
+                vel.setVx(vx);
+                vel.setVy(vy);
+
+                if (dist > radius || dist == 0) {
+                    if (dist == 0) {
+                        mass = mc/numCells;
+                        temp = Tc;
+                    }
+                    vel = VelocityVector(0,0);
                 }
 
+                cell->setVelocity(vel);
+                // if (dist/radius < 1 && vy < 0) std::cout << " dist,vx,vy " << dist/radius << "," << cell->getVelocity().getVx() << "," << cell->getVelocity().getVy();
                 cell->setMass(mass);
                 cell->setTemp(temp);
                 cell->gete(true);
@@ -832,6 +850,51 @@ class FluidGrid {
             return idToCell;
         }
 
+        uint64_t getIDFromXY(double x, double y) {
+            // returns the ID based on the current max depth
+            double cellWidth, cellHeight;
+            uint32_t ID = 0;
+            uint32_t col, row;
+            char mask = 0x1;
+            cellWidth = width / pow(pow(4,maxDepth),0.5);
+            cellHeight = height / pow(pow(4,maxDepth),0.5);
+            col = (int)(x/cellWidth);
+            row = (int)((height - y)/cellHeight);
+            for (int i = 0; i < maxDepth; i++) {
+                ID = ID | (((col & mask) | ((row & mask) << 1)) << i);
+                mask = mask << 1;
+            }
+            return ((uint64_t) maxDepth<<32) + ID;
+        }
+
+        uint64_t getIDFromXY(position pos) {
+            // returns the ID based on the current max depth
+            double x = pos.x;
+            double y = pos.y;
+            double cellWidth, cellHeight;
+            uint32_t ID = 0;
+            uint32_t col, row;
+            char mask = 0x1;
+            cellWidth = width / pow(pow(4,maxDepth),0.5);
+            cellHeight = height / pow(pow(4,maxDepth),0.5);
+            col = (int)(x/cellWidth);
+            row = (int)((height - y)/cellHeight);
+            for (int i = 0; i < maxDepth; i++) {
+                ID = ID | (((col & mask) | ((row & mask) << 1)) << i);
+                mask = mask << 1;
+            }
+            return ((uint64_t) maxDepth<<32) + ID;
+        }
+
+        FluidCell *getCellFromXY(double x, double y) {
+            uint64_t ID = getIDFromXY(x, y);
+            uint32_t depth = ID >> 32;
+            uint32_t index = ID & 0xffffffff;
+            while (!idToCell.count(ID)) {
+                ID = ((uint64_t) (depth - 1) << 32) | (index >> 2);
+            }
+            return idToCell[ID];
+        }
         
         xyPos getXY(uint32_t depth, uint32_t index) {
             /* Gets position of bottom left corner of cell */
@@ -945,7 +1008,7 @@ class FluidGrid {
                 double gradPy = (pressT - pressB)/(distT+distB);
                 double gradPx = (pressR - pressL)/(distL+distR);
                 VelocityVector v = cell->getVelocity();
-                if (cell->getDensity() > 0) {
+                if (cell->getDensity() > 1e-6) {
                     VelocityVector diff = velDiffusion(cell);
                     double newVx = v.getVx() + (-gradUx-gradPx/cell->getDensity() + diff.getVx()/cell->getDensity())*getdt();
                     double newVy = v.getVy() + (-gradUy-gradPy/cell->getDensity() + diff.getVy()/cell->getDensity())*getdt();
@@ -998,12 +1061,12 @@ class FluidGrid {
                 // if (cell == cellB) {
                 //     newV.setVy(std::max((double) 0.0, newV.getVy()));
                 // }
-                // if (cell == cellR || cell == cellL) {
-                //     newV.setVx(0);
-                // }
-                // if (cell == cellT || cell == cellB) {
-                //     newV.setVy(0);
-                // }
+                if (cell == cellR || cell == cellL) {
+                    newV.setVx(0);
+                }
+                if (cell == cellT || cell == cellB) {
+                    newV.setVy(0);
+                }
                 // if (cell == cellR || cell == cellL || cell == cellT || cell == cellB) {
                 //     newV.setVx(0);
                 //     newV.setVy(0);
@@ -1102,10 +1165,10 @@ class FluidGrid {
             for (int i = 0; i < leafCells.size(); i++) {
                 FluidCell *cell = leafCells[i];
                 float energyReduction = 1;
-                if (cell->getDensity() < 1e-4) {
+                if (cell->getDensity() < 1e-6) {
                     // energyReduction = cell->getDensity()/maxDensity;
                     // energyReduction = 1e-5;
-                    // continue;
+                    continue;
                 }
                 FluidCell *cellT = cell->getTop();
                 FluidCell *cellB = cell->getBottom();
@@ -1197,8 +1260,31 @@ class FluidGrid {
                 E += energyReduction*(fusionEnergy+fusionHeEnergy);
 
                 // pressure-work term
+                if (cell == cellR) {
+                    // vR.setVx(0);
+                    vR.setVx(vL.getVx());
+                    // vR.setVx(cell->getVelocity().getVx());
+                } 
+                if (cell == cellL) {
+                    // vL.setVx(0);
+                    vL.setVx(vR.getVx());
+                    // vL.setVx(cell->getVelocity().getVx());
+                } 
+                if (cell == cellT) {
+                    // vT.setVy(0);
+                    vT.setVy(vB.getVy());
+                    // vT.setVy(cell->getVelocity().getVy());
+                } 
+                if (cell == cellB) {
+                    // vB.setVy(0);
+                    vB.setVy(vT.getVy());
+                    // vB.setVy(cell->getVelocity().getVy());
+                }
                 double div = (vR.getVx()-vL.getVx())/(distR+distL) + (vT.getVy()-vB.getVy())/(distT+distB);
                 double pdiv = pressure * div;
+                if (cell == cellR || cell == cellL || cell == cellT || cell == cellB) {
+                    pdiv = 0.0f;
+                }
                 if (E - pdiv * getdt() >= 0) {
                     E += energyReduction*(-pdiv * getdt());
                 } else {
@@ -1223,6 +1309,10 @@ class FluidGrid {
                 // double gravR = getCell(i,j+1)->getGravPotential();
                 double gx = -(gravR-gravL)/(distR+distL);
                 double gravWork = (cell->getVelocity().getVx()*gx+cell->getVelocity().getVy()*gy)*density;
+                if (cell == cellR || cell == cellL || cell == cellT || cell == cellB) {
+                    gravWork = 0.0f;
+                }
+
                 if (E + gravWork * getdt() >= 0) {
                     E += energyReduction*(gravWork * getdt());
                 } else {
@@ -1233,6 +1323,10 @@ class FluidGrid {
                 // std::cout << "E: " << cell->getE(false) << std::endl;
 
                 // E += energyReduction*(radiativeTransfer(cell)*getdt());
+
+                if (cell->index == 0x3755) {
+                    // std::cout << "E: " << cell->getE(false) << " press work: " << -pdiv*getdt() << " grav work: " << gravWork*getdt() << " vB,vT: " << vB.getVy() << "," << vT.getVy() << std::endl;
+                }
 
                 cell->setE(E);
                 
@@ -4197,9 +4291,17 @@ class FluidGrid {
                     XFluxR = std::max((long double) 0, XFluxL);
                     YFluxR = std::max((long double) 0, YFluxL);
                     ZFluxR = std::max((long double) 0, ZFluxL);
+                    // massFluxR = massFluxL;
+                    // EFluxR = EFluxL;
+                    // vxFluxR = vxFluxL;
+                    // vyFluxR = vyFluxL;
+                    // XFluxR = XFluxL;
+                    // YFluxR = YFluxL;
+                    // ZFluxR = ZFluxL;
                     // massFluxR = 0;
                     // EFluxR = 0;
                     // vxFluxR = 0;
+                    // vyFluxR = 0;
                     // XFluxR = 0;
                     // YFluxR = 0;
                     // ZFluxR = 0;
@@ -4212,9 +4314,17 @@ class FluidGrid {
                     XFluxL = std::min((long double) 0, XFluxR);
                     YFluxL = std::min((long double) 0, YFluxR);
                     ZFluxL = std::min((long double) 0, ZFluxR);
+                    // massFluxL = massFluxR;
+                    // EFluxL = EFluxR;
+                    // vxFluxL = vxFluxR;
+                    // vyFluxL = vyFluxR;
+                    // XFluxL = XFluxR;
+                    // YFluxL = YFluxR;
+                    // ZFluxL = ZFluxR;
                     // massFluxL = 0;
                     // EFluxL = 0;
                     // vxFluxL = 0;
+                    // vyFluxL = 0;
                     // XFluxL = 0;
                     // YFluxL = 0;
                     // ZFluxL = 0;
@@ -4227,8 +4337,16 @@ class FluidGrid {
                     XFluxT = std::max((long double) 0, XFluxB);
                     YFluxT = std::max((long double) 0, YFluxB);
                     ZFluxT = std::max((long double) 0, ZFluxB);
+                    // massFluxT = massFluxB;
+                    // EFluxT = EFluxB;
+                    // vxFluxT = vxFluxB;
+                    // vyFluxT = vyFluxB;
+                    // XFluxT = XFluxB;
+                    // YFluxT = YFluxB;
+                    // ZFluxT = ZFluxB;
                     // massFluxT = 0;
                     // EFluxT = 0;
+                    // vxFluxT = 0;
                     // vyFluxT = 0;
                     // XFluxT = 0;
                     // YFluxT = 0;
@@ -4242,12 +4360,31 @@ class FluidGrid {
                     XFluxB = std::min((long double) 0, XFluxT);
                     YFluxB = std::min((long double) 0, YFluxT);
                     ZFluxB = std::min((long double) 0, ZFluxT);
+                    // massFluxB = massFluxT;
+                    // EFluxB = EFluxT;
+                    // vxFluxB = vxFluxT;
+                    // vyFluxB = vyFluxT;
+                    // XFluxB = XFluxT;
+                    // YFluxB = YFluxT;
+                    // ZFluxB = ZFluxT;
                     // massFluxB = 0;
                     // EFluxB = 0;
+                    // vxFluxB = 0;
                     // vyFluxB = 0;
                     // XFluxB = 0;
                     // YFluxB = 0;
                     // ZFluxB = 0;
+                }
+
+                if (cell == cellR || cell == cellL || cell == cellT || cell == cellB) {
+                    vxFluxR = 0;
+                    vxFluxL = 0;
+                    vxFluxT = 0;
+                    vxFluxB = 0;
+                    vyFluxR = 0;
+                    vyFluxL = 0;
+                    vyFluxT = 0;
+                    vyFluxB = 0;
                 }
 
                 // if (!std::isfinite(EFluxR) || !std::isfinite(massFluxR)) {
@@ -4694,9 +4831,17 @@ class FluidGrid {
                     XFluxR = std::max((long double) 0, XFluxL);
                     YFluxR = std::max((long double) 0, YFluxL);
                     ZFluxR = std::max((long double) 0, ZFluxL);
+                    // massFluxR = massFluxL;
+                    // EFluxR = EFluxL;
+                    // vxFluxR = vxFluxL;
+                    // vyFluxR = vyFluxL;
+                    // XFluxR = XFluxL;
+                    // YFluxR = YFluxL;
+                    // ZFluxR = ZFluxL;
                     // massFluxR = 0;
                     // EFluxR = 0;
                     // vxFluxR = 0;
+                    // vyFluxR = 0;
                     // XFluxR = 0;
                     // YFluxR = 0;
                     // ZFluxR = 0;
@@ -4709,9 +4854,17 @@ class FluidGrid {
                     XFluxL = std::min((long double) 0, XFluxR);
                     YFluxL = std::min((long double) 0, YFluxR);
                     ZFluxL = std::min((long double) 0, ZFluxR);
+                    // massFluxL = massFluxR;
+                    // EFluxL = EFluxR;
+                    // vxFluxL = vxFluxR;
+                    // vyFluxL = vyFluxR;
+                    // XFluxL = XFluxR;
+                    // YFluxL = YFluxR;
+                    // ZFluxL = ZFluxR;
                     // massFluxL = 0;
                     // EFluxL = 0;
                     // vxFluxL = 0;
+                    // vyFluxL = 0;
                     // XFluxL = 0;
                     // YFluxL = 0;
                     // ZFluxL = 0;
@@ -4724,8 +4877,16 @@ class FluidGrid {
                     XFluxT = std::max((long double) 0, XFluxB);
                     YFluxT = std::max((long double) 0, YFluxB);
                     ZFluxT = std::max((long double) 0, ZFluxB);
+                    // massFluxT = massFluxB;
+                    // EFluxT = EFluxB;
+                    // vxFluxT = vxFluxB;
+                    // vyFluxT = vyFluxB;
+                    // XFluxT = XFluxB;
+                    // YFluxT = YFluxB;
+                    // ZFluxT = ZFluxB;
                     // massFluxT = 0;
                     // EFluxT = 0;
+                    // vxFluxT = 0;
                     // vyFluxT = 0;
                     // XFluxT = 0;
                     // YFluxT = 0;
@@ -4739,12 +4900,31 @@ class FluidGrid {
                     XFluxB = std::min((long double) 0, XFluxT);
                     YFluxB = std::min((long double) 0, YFluxT);
                     ZFluxB = std::min((long double) 0, ZFluxT);
+                    // massFluxB = massFluxT;
+                    // EFluxB = EFluxT;
+                    // vxFluxB = vxFluxT;
+                    // vyFluxB = vyFluxT;
+                    // XFluxB = XFluxT;
+                    // YFluxB = YFluxT;
+                    // ZFluxB = ZFluxT;
                     // massFluxB = 0;
                     // EFluxB = 0;
+                    // vxFluxB = 0;
                     // vyFluxB = 0;
                     // XFluxB = 0;
                     // YFluxB = 0;
                     // ZFluxB = 0;
+                }
+
+                if (cell == cellR || cell == cellL || cell == cellT || cell == cellB) {
+                    vxFluxR = 0;
+                    vxFluxL = 0;
+                    vxFluxT = 0;
+                    vxFluxB = 0;
+                    vyFluxR = 0;
+                    vyFluxL = 0;
+                    vyFluxT = 0;
+                    vyFluxB = 0;
                 }
 
                 // if (cell->newMass < 0) {
@@ -4800,9 +4980,9 @@ class FluidGrid {
                     }
 
                     if (cell->newMass < 0) {
-                        std::cout << "neg mass: ";
-                        printID(cell->index);
-                        std::cout << " " << cell->newMass << std::endl;
+                        // std::cout << "neg mass: ";
+                        // printID(cell->index);
+                        // std::cout << " " << cell->newMass << std::endl;
                     }
                     cell->setMass(cell->newMass);
                     cell->setE(cell->newE);
@@ -4810,8 +4990,8 @@ class FluidGrid {
                     cell->setVelocity(cell->newVelocity/cell->newMass);
                     long double factor = cell->newMass/(cell->newX+cell->newY+cell->newZ);
                     if ((float) ((cell->newX+cell->newY+cell->newZ)/cell->newMass) > 1.5) {
-                        printID(cell->index);
-                        std::cout << " comp: " << (float) 1/factor << " " << (float) (cell->newX/cell->newMass) << " " << (float) (cell->newY/cell->newMass) << " " << (float) (cell->newZ/cell->newMass) << std::endl;
+                        // printID(cell->index);
+                        // std::cout << " comp: " << (float) 1/factor << " " << (float) (cell->newX/cell->newMass) << " " << (float) (cell->newY/cell->newMass) << " " << (float) (cell->newZ/cell->newMass) << std::endl;
                         // 00010100010001
                     }
 
@@ -4820,6 +5000,19 @@ class FluidGrid {
                     cell->setZ(std::max(0.0f,std::min(1.0f,(float) (factor*cell->newZ/cell->newMass))));
                     cell->sete(cell->getE(false) - 0.5*cell->getDensity()*cell->getVelocity().getMag()*cell->getVelocity().getMag());
                     cell->getTemp(true);
+                    if (cell->index == 0x3755) {
+                        // std::cout << "T: " << cell->getTemp(false) << " e: " << cell->gete(false) << " E: " << cell->getE(false) << " d: " << cell->getDensity() << " vL: " << cell->getLeft()->getVelocity().getVx() << " vT: " << cell->getTop()->getVelocity().getVy() << " vB: " << cell->getBottom()->getVelocity().getVy() << std::endl;
+                    }
+                    // if (cell->getTemp(false) > 1e8) {
+                    //     // printID(cell->index);
+                    //     std::cout << " highTemp (T,V,d,e): " << cell->getTemp(false) << "," << cell->getVelocity().getMag() << "," << cell->getDensity() << "," << cell->gete(false) << std::endl;
+                    // }
+                    // if (cell->getTemp(false) > 1e8) {
+                    //     std::cout << "div: " << cell->getRight()->getVelocity().getVx() - cell->getLeft()->getVelocity().getVx() + cell->getTop()->getVelocity().getVy() - cell->getBottom()->getVelocity().getVy() << std::endl;
+                    // }
+                    // if (cell->getDensity() > 300) {
+                    //     std::cout << "high dens div: " << cell->getRight()->getVelocity().getVx() - cell->getLeft()->getVelocity().getVx() + cell->getTop()->getVelocity().getVy() - cell->getBottom()->getVelocity().getVy() << std::endl;
+                    // }
                     cell->getPressure(true);
                 }
                 // if (std::isfinite(cell->newMass)) cell->setMass(cell->newMass);
@@ -5058,7 +5251,7 @@ class FluidGrid {
 
         void update() {
             // double new_dt = 0.4*minSize / maxV;
-            double new_dt = dt*1.4/maxFracTraveled;
+            double new_dt = dt*1/maxFracTraveled;
             // double new_dt = dt*0.05/avgFracTraveled;
             dt = std::max(dt*0.1,std::min(new_dt, dt*1.05));
             T += dt;
@@ -5082,9 +5275,9 @@ class FluidGrid {
             // tote = 0;
             for (int i = 0; i < leafCells.size(); i++) {
                 // tote += leafCells[i]->getE(false)*leafCells[i]->getSize();
-                if (T < 1000) {
+                // if (T < 1000) {
                 // setAMR(leafCells[i]);
-                }
+                // }
             }
             // std::cout << "\r" << tote << std::endl;
             auto setamr = std::chrono::steady_clock::now();
@@ -5096,9 +5289,8 @@ class FluidGrid {
             // if (maxFracTraveled > 1) {
                 // std::cout << "maxFrac " <<  maxFracTraveled << " " << maxV << std::endl;
             // }
-
             if (leafCells.size() < 0.5*pow(4,minDepth+2)) maxDepth += 1;
-            else if (leafCells.size() > 0.95*pow(4,maxDepth)) maxDepth -= 1;
+            // else if (leafCells.size() > 0.95*pow(4,maxDepth)) maxDepth -= 1;
             // if(std::chrono::duration_cast<std::chrono::milliseconds>(leaf - start).count() > 500) maxDepth -= 1; 
 
             // std::cout << totMass << std::endl;
@@ -5138,7 +5330,7 @@ class FluidGrid {
         // density threshold
         float densCoarseThresh = 0.01;
         float densRefineThresh = 0.5;
-        float viscosity = 0;
+        float viscosity = 0.7;
         double width, height;
         double maxV;
         double minSize; // minimum side length
@@ -5177,6 +5369,7 @@ class Simulator {
             double cellWidth, cellHeight;
             double thisMaxPressure = 0;
             double thisMaxMass = 0;
+            double thisMinDensity = maxDensity;
             double thisMaxDensity = 0;
             double thisMaxTemperature = 0;
             double thisMinTemperature = 0;
@@ -5195,7 +5388,7 @@ class Simulator {
                 double density = cell->getDensity();
                 double temperature = cell->getTemp(false);
                 double gravPotential = cell->getGravPotential();
-                double e = cell->getE(false);
+                double e = cell->gete(false);
                 float X = std::max(0.0f,std::min(1.0f,cell->getX()));
                 float Y = std::max(0.0f,std::min(1.0f,cell->getY()));
                 float Z = std::max(0.0f,std::min(1.0f,cell->getZ()));
@@ -5207,17 +5400,17 @@ class Simulator {
 
                 SDL_Rect rect{(int)(xyBL.x/SCALE_W), (int)(consts::GRID_HEIGHT - ((xyBL.y+cellHeight)/SCALE_H)), (int)(cellWidth/SCALE_W)+1, (int)(cellHeight/SCALE_H)+1};
                 if (density > thisMaxDensity) thisMaxDensity = density;
-                // if (density > maxDensity) density = maxDensity;
+                if (density < thisMinDensity) thisMinDensity = density;
                 if (pressure > thisMaxPressure) {
                     thisMaxPressure = pressure;
                 }
-                if (temperature > thisMaxTemperature ) {
+                if (temperature > thisMaxTemperature) {
                     // && density > 0.01*maxDensity
                     thisMaxTemperature = temperature;
                 }
                 if (gravPotential < thisMinGP) thisMinGP = gravPotential;
                 if (e > thisMaxe) thisMaxe = e;
-                if (fusion > thisMaxFusion) thisMaxFusion = fusion;    
+                if (fusion > thisMaxFusion) thisMaxFusion = fusion;
 
                 double maxBit = 255.0;
                 double zero = 0;
@@ -5295,9 +5488,73 @@ class Simulator {
                 }
             }
 
+            if (mouseValueDisplay) {
+                // Initialize SDL_ttf library
+                if (TTF_Init() != 0)
+                {
+                    std::cerr << "TTF_Init() Failed: " << TTF_GetError() << std::endl;
+                    SDL_Quit();
+                    exit(1);
+                }
+                // Load a font
+                TTF_Font *font;
+                font = TTF_OpenFont("Swansea-q3pd.ttf", 12);
+                if (font == NULL)
+                {
+                    std::cerr << "TTF_OpenFont() Failed: " << TTF_GetError() << std::endl;
+                    TTF_Quit();
+                    SDL_Quit();
+                    exit(1);
+                }
+
+                // get mouse position
+                int mouseX, mouseY;
+                SDL_GetMouseState(&mouseX,&mouseY);
+
+                // translate position to physical space
+                double physX, physY;
+                physX = (double)mouseX * SCALE_W;
+                physY = height - (double)mouseY * SCALE_H;
+
+                FluidCell *cell = grid->getCellFromXY(physX, physY);
+
+                long double value = cell->getMass();
+                std::ostringstream oss1;
+                oss1 << std::scientific << value;
+                std::string valueString = oss1.str();
+                
+
+                // Write text to surface
+                SDL_Surface *text;
+                SDL_Color text_color = {255, 255, 255};
+                text = TTF_RenderText_Solid(font,
+                valueString.c_str(),
+                text_color);
+
+                if (text == NULL)
+                {
+                    std::cerr << "TTF_RenderText_Solid() Failed: " << TTF_GetError() << std::endl;
+                    TTF_Quit();
+                    SDL_Quit();
+                    exit(1);
+                }
+
+                SDL_Texture* Message = SDL_CreateTextureFromSurface(renderer, text);
+                // SDL_BlitSurface(text, NULL, screenSurface, NULL);
+                SDL_Rect Message_rect; //create a rect
+                Message_rect.x = mouseX;  //controls the rect's x coordinate 
+                Message_rect.y = mouseY; // controls the rect's y coordinte
+                Message_rect.w = 100; // controls the width of the rect
+                Message_rect.h = 30; // controls the height of the rect
+
+                SDL_RenderCopy(renderer, Message, NULL, &Message_rect);
+                // SDL_blit(screenSurface);
+            }
+
 
             maxPressure = thisMaxPressure;
             maxDensity = thisMaxDensity;
+            minDensity = thisMinDensity;
             // maxDensity = 10;
             maxMass = thisMaxMass;
             maxTemperature = thisMaxTemperature;
@@ -5307,7 +5564,7 @@ class Simulator {
             maxe = thisMaxe;
             maxFusion = thisMaxFusion;
             SDL_RenderPresent(renderer);
-            if (thisMaxDensity > maxDensity) maxDensity = thisMaxDensity;
+            // if (thisMaxDensity > maxDensity) maxDensity = thisMaxDensity;
         }
         
         void step(SDL_Event event) {
@@ -5340,7 +5597,7 @@ class Simulator {
                         ZDisplay = 0;
                         fusionDisplay = 0;
                         degenerateDisplay = 0;
-                        std::cout << "max Density: " << maxDensity << std::endl;
+                        std::cout << "max Density: " << maxDensity << " min Density: " << minDensity << std::endl;
                         break;
                     case SDLK_t:
                         densityDisplay = 0;
@@ -5445,11 +5702,15 @@ class Simulator {
                         break;
                     case SDLK_v:
                         velocityDisplay = !(velocityDisplay);
+                        break;
+                    case SDLK_m:
+                        mouseValueDisplay = !(mouseValueDisplay);
                 }
             }
             if (display) {
                 drawCells();
             }
+            
             if (save) {
                 saveSim();
             }
@@ -5487,6 +5748,7 @@ class Simulator {
 
         FluidGrid *grid;
     private:
+        // in meters per pixel
         double SCALE_H, SCALE_W;
         double width, height;
         bool display, save;
@@ -5500,6 +5762,7 @@ class Simulator {
         double maxMass = 255;
         double maxPressure = 1;
         double maxDensity = 1;
+        double minDensity = 1e10;
         double maxTemperature = 1;
         double minTemperature = 0;
         double minGP = 0;
@@ -5517,6 +5780,7 @@ class Simulator {
         uint degenerateDisplay = 0;
         uint gridDisplay = 0;
         uint velocityDisplay = 1;
+        uint mouseValueDisplay = 0;
 };
 
 void printBinaryRecursive(uint64_t num) {
