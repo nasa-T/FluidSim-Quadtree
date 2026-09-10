@@ -87,7 +87,10 @@ class FluidCell {
             long double cv = consts::r/(consts::HMol*hydrogen/nonMet+consts::HeMol*helium/nonMet)/(1.4-1);
             e = cv*temperature*density;
             // std::cout << e << std::endl;
-            pressure = (1.4-1)*e;
+			double kap = opacity(getDensity(),getTemp(false),getX());
+			double tau = opticalDepth(kap, getDensity(), sqrt(getSize()));
+			double rad_pressure = 1/3*consts::sig_sb*pow(temperature,4)/consts::c*(1 - exp(-tau));
+            pressure = (1.4-1)*e + rad_pressure;
             velocity = VelocityVector();
             neighbors = Neighbors();
             double gravPotential = 0;
@@ -140,13 +143,16 @@ class FluidCell {
             // double oldPressure = pressure;
             if (recalculate) {
                 // pressure = getDensity()/consts::HMol * consts::r * getTemp();
-                pressure = (1.4 - 1)*gete(false);
+				double kap = opacity(getDensity(),getTemp(false),getX());
+				double tau = opticalDepth(kap, getDensity(), sqrt(getSize()));
+				double rad_pressure = 1/3*consts::sig_sb*pow(temperature,4)/consts::c*(1 - exp(-tau));
+                pressure = (1.4 - 1)*gete(false) + rad_pressure;
             }
             
             double degen_pressure = 1/8*std::pow(3/consts::PI,1/3)*consts::h*consts::c*std::pow(getDensity()/consts::mH, 4/3);
             pressure = std::max(degen_pressure, pressure);
             if (pressure == degen_pressure) degenerate = 1;
-            else degenerate = 0;
+            else degenerate = 0;			
         
             return pressure;
         }
@@ -156,10 +162,10 @@ class FluidCell {
         }
 
         void setMass(long double m) {
-            if (m > 0 && std::isfinite(m)) {
+            if (m > 1e-8*getSize() && std::isfinite(m)) {
                 mass = m;
             } else {
-                mass = 0;
+                mass = 1e-8*getSize();
                 // e = 0;
                 // E = 0;
                 // pressure = 0;
@@ -178,10 +184,10 @@ class FluidCell {
 
         void setX(float h) {
             if (h < 0) hydrogen = 0;
-            else if (h > 1) hydrogen = 1;
+            else if (h > 1)	hydrogen = 1;
             else hydrogen = h;
             // if (round(mass) > 0) {
-                
+
             // } else {
             //     // std::cout << mass << " " << h << std::endl;
             //     hydrogen = 0;
@@ -249,7 +255,7 @@ class FluidCell {
             }
             return e;
         }
-
+	
         void sete(long double energy) {
             if (mass > 0 && energy > 0) {
                 e = energy;
@@ -277,6 +283,10 @@ class FluidCell {
             }
         }
 
+	    void pressGrad(long double pg) {
+			PG = pg;
+	    }
+	
         uint getDegenerate() {
             return degenerate;
         }
@@ -350,6 +360,9 @@ class FluidCell {
         }
 
         void setVelocity(VelocityVector v) {
+			if (v.getMag() == 0.0) {
+				//std::cout << "zero vel dens: " << getDensity() << std::endl;
+			}
             velocity = v;
         }
 
@@ -455,7 +468,7 @@ class FluidCell {
                 se = nullptr;
             }
         }
-
+	
         bool isLeaf() {
             return !(hasChildren());
         }
@@ -473,6 +486,7 @@ class FluidCell {
         bool shouldRefine = false;
         bool shouldCoarsen = false;
         bool refinedThisStep = false;
+	    long double PG = 0;
     private:
         long double mass, e, E;
         double size, density, temperature, pressure, gravPotential, width, height, fusionE; 
@@ -484,6 +498,177 @@ class FluidCell {
         // FluidCell *children[4] = {nw, ne, sw, se};
 };
 
+// A class to initialize a star in a FluidGrid
+class Star {
+    public:
+		Star(double SolMass, double Radius, double rotation): totRadius(Radius) {
+			totMass = SolMass*consts::SUN_MASS;
+			// cenDensity = totMass/(4*consts::PI*8/105*pow(Radius,3));
+			LEcoords = solveLaneEmden(0.0,1.0,0.0,0.1);
+			//std::cout << LE["th"][0] << std::endl;
+			int num_coords = LEcoords["xi"].size();
+			xi1p = (LEcoords["th"][num_coords-1] - LEcoords["th"][num_coords-2])/(LEcoords["xi"][num_coords-1]-LEcoords["xi"][num_coords-2]); //dth/dxi(xi1)
+																			  	double y_int = LEcoords["th"][num_coords-1] - xi1p*LEcoords["xi"][num_coords-1];
+			xi1 = -y_int/xi1p; 
+			std::cout << LEcoords["xi"][num_coords-1] << std::endl;
+			// std::cout << "last coord: " << LEcoords["xi"][num_coords-1] << "," << LEcoords["th"][num_coords-1] << std::endl;
+			double alph = Radius/xi1;
+			cenDensity = totMass/(-4*consts::PI*pow(xi1,2)*xi1p*pow(alph,3));
+			// rotation == surface velocity
+	    }
+
+		void placeInGrid(double x, double y, std::vector<FluidCell*> leaves, double width, double height) {
+			for (int i = 0; i < leaves.size(); i++) {
+				// x and y are offsets from center
+				FluidCell *cell = leaves[i];
+				xyPos xy = getXY(cell->depth, cell->index, width, height);
+				double radius = pow(pow(width/2-x-xy.x,2) + pow(height/2-y-xy.y,2),0.5);
+				if (radius < totRadius) {
+					double density = getDensity(radius);
+					double temperature = getTemperature(radius, cell->getCv());
+					cell->setMass(density*cell->getSize());
+					cell->setTemp(temperature);
+					cell->gete(true);
+					cell->setE(cell->gete(false));
+					cell->getPressure(true);
+				}
+			}
+			
+	    }
+
+		double getTemperature(double radius, double Cv) {
+			double K = 4*consts::PI*consts::G*pow(totRadius/xi1,2)/(4*pow(cenDensity,1.0/3.0-1));	
+			
+			return K*consts::mH/consts::kb*pow(cenDensity,1.0/3.0)*getTheta(radius/totRadius*xi1);
+			//return K/Cv*(1.4-1)*pow(cenDensity,1.0/3.0)*getTheta(radius/totRadius*xi1);
+			
+			//double pressure = 4*consts::PI*consts::G*pow(cenDensity,2)*((double) 13/317*pow(totRadius,2) + (double) (1/6*pow(radius,2) - 4/15*pow(radius,4)/pow(totRadius,2) \
+															  + 67/315*pow(radius,6)/pow(totRadius,4) - 3/35*pow(radius,8)/pow(totRadius,6)\
+																		  + 1/70*pow(radius,10)/pow(totRadius,8)));
+			//if (radius == 0) {
+			//	std::cout << "P, T: " << (double) 4*consts::PI*consts::G*pow(cenDensity,2)*13/317*pow(totRadius,2) << ", " << pressure/((1.4-1.0)*Cv*getDensity(radius)) << std::endl;
+			//}
+			//return pressure/((1.4-1.0)*Cv*getDensity(radius));
+	    }
+
+	    double getDensity(double radius) {
+		    return radius < totRadius ? cenDensity*pow(getTheta(radius/totRadius*xi1),3) : 1e-8;
+			//return radius < totRadius ? cenDensity*pow((1 - pow(radius/totRadius, 2)), 2) : 1e-8;
+	    }
+
+		xyPos getXY(uint32_t depth, uint32_t index, double width, double height) {
+            /* Gets position of bottom left corner of cell */
+            uint32_t xmask = 0x1;
+            uint32_t ymask = 0x2;
+            uint16_t xInd = 0x0;
+            uint16_t yInd = 0x0;
+            for (int i = 0; i < depth; i++) {
+                xInd = ((xmask & index) >> i) | xInd;
+                xmask = (xmask << 2);
+                yInd = ((ymask & index) >> (i+1)) | yInd;
+                ymask = (ymask << 2);
+            }
+            double cellWidth = width / pow(pow(4,depth),0.5);
+            double cellHeight = height / pow(pow(4,depth),0.5);
+            xyPos xy;
+            xy.x = cellWidth*xInd;
+            xy.y = height - cellHeight*(yInd+1);
+            return xy;
+        }
+
+	    std::map<std::string, std::vector<double>> solveLaneEmden(double xii, double thi, double yi, double h) {
+			double xi0 = xii;
+			double th0 = thi;
+			double y0 = yi;
+			std::map<std::string, std::vector<double>> coords = {{"xi", std::vector<double>{}}, {"th", std::vector<double>{}}};
+			auto dy = [](double xi, double th, double y) { if (xi != 0.0f) return (double) -pow(th,3) - (double) 2/xi * y; else return (double) -1/3; };
+			std::cout << h*dy(0.1,0.99,-0.1) << std::endl;
+			while (th0 > 0) {
+				double k1th = h*y0;
+				double k1y = h*dy(xi0, th0, y0);
+				double k2th = h*(y0+k1y/2);
+				double k2y = h*dy(xi0+h/2, th0+k1th/2, y0+k1y/2);
+				double k3th = h*(y0+k2y/2);
+				double k3y = h*dy(xi0+h/2, th0+k2th/2, y0+k2y/2);
+				double k4th = h*(y0+k3y);
+				double k4y = h*dy(xi0+h, th0+k3th, y0+k3y);
+				//std::cout << k4th << " " << std::flush;
+				th0 = th0 + ((double) 1/(double) 6) * (k1th + 2*k2th + 2*k3th + k4th);
+				y0 = y0 + ((double) 1/(double) 6) * (k1y + 2*k2y + 2*k3y + k4y);
+				
+				std::vector<double> vxi = coords["xi"];
+				std::vector<double> vth = coords["th"];
+				xi0 = xi0+h;
+				vxi.push_back(xi0);
+				vth.push_back(th0);
+				coords["xi"] = vxi;
+				coords["th"] = vth;
+				//th0 = th1;
+				//y0 = y1;
+			}
+			return coords;
+	    }
+
+	    std::map<std::string, std::vector<double>> solveLaneEmdenRec(double xi0, double th0, double y0, double h) {
+			if (th0 > 0) {
+				auto dy = [](double xi, double th, double y) { if (xi != 0) return -pow(th,3) - 2/xi * y; else return (double) -1/3; };
+				double k1th = h*y0;
+				double k1y = h*dy(xi0, th0, y0);
+				double k2th = h*(y0+k1y/2);
+				double k2y = h*dy(xi0+h/2, th0+k1th/2, y0+k1y/2);
+				double k3th = h*(y0+k2y/2);
+				double k3y = h*dy(xi0+h/2, th0+k2th/2, y0+k2y/2);
+				double k4th = h*(y0+k3y);
+				double k4y = h*(xi0+h, th0+k3th, y0+k3y);
+				double th1 = th0 + 1/6 * (k1th + 2*k2th + 2*k3th + k4th);
+				double y1 = y0 + 1/6 * (k1y + 2*k2y + 2*k3y + k4y);
+				std::map<std::string,std::vector<double>> coords = solveLaneEmdenRec(xi0+h, th1, y1, h);
+				std::vector<double> vxi = coords["xi"];
+				std::vector<double> vth = coords["th"];
+				vxi.push_back(xi0+h);
+				vth.push_back(th1);
+				coords["xi"] = vxi;
+				coords["th"] = vth;
+				return coords;
+				
+			} else {
+				std::map<std::string, std::vector<double>> coords = {{"xi", std::vector<double>{}}, {"th", std::vector<double>{}}};
+				return coords;
+			}
+	    }
+
+	    double getTheta(double xi) {
+		int loc;
+		double dist = 1.0f; // minimum distance of xi from coordXi
+		for (int i = 0; i < LEcoords["xi"].size(); i++) {
+			double coordXi = LEcoords["xi"][i];
+			double coordTheta = LEcoords["th"][i];
+			if (abs(xi - coordXi) < dist) {
+				dist = xi - coordXi;
+				loc = i;
+			}
+		}
+
+		int nextLoc;
+		if (dist > 0) {
+			nextLoc = loc + 1;
+		} else if (dist < 0) {
+			nextLoc = loc - 1;
+		} else {
+			return LEcoords["th"][loc];
+		}
+
+		double m = (LEcoords["th"][nextLoc] - LEcoords["th"][loc])/(LEcoords["xi"][nextLoc] - LEcoords["xi"][loc]);
+		double b = LEcoords["th"][nextLoc] - m*LEcoords["xi"][nextLoc];
+		return m*xi + b;
+	    }
+	
+    private:
+		double totMass, totRadius, cenDensity;
+		std::map<std::string, std::vector<double>> LEcoords; 
+		double xi1, xi1p;
+};
+
 class FluidGrid {
     public:
         FluidGrid(double width, double height, int startDepth, float dt): width(width), height(height), dt(dt) {
@@ -493,53 +678,63 @@ class FluidGrid {
             leafCells.reserve(pow(4,maxDepth));
             updateLeafCells();
             setNeighbors();
-            
+
+			for (int i = 0; i < leafCells.size(); i++) {
+				leafCells[i]->setMass(1e-8*leafCells[i]->getSize());
+				leafCells[i]->setTemp(10);
+			}
+			
+			Star *s1 = new Star(1.0, 6e8, 0);
+
+			s1->placeInGrid(0, 0, leafCells, width, height);
+			
             double mass, temp;
-            maxV = 0;
-            for (int i = 0; i < leafCells.size(); i++) {
-                FluidCell *cell = leafCells[i];
-                // mass = (std::rand() % 100) * 1e16;
-                xyPos xy = getXY(cell->depth,cell->index);
-                double radius = pow(width*height,0.5)/4;
-                double dist = pow(pow(width/2-xy.x,2) + pow(height/2-xy.y,2),0.5);
-                double Tc = 5e6;
-                // double Tc = 1e8;
-                long double mc = 1e22;
-                // mass = dist < radius ? pow(1-dist/radius,3)*1e24/numCells : 1e18/numCells;
-                mass = dist < radius ? std::sin(consts::PI/2 * dist/radius)/(consts::PI *dist/radius) * mc/numCells : 1e15/numCells;
-                // temp = dist < radius ? pow(1-dist/radius,3)*1e6 : 10;
-                // temp = dist < radius ? std::cos(consts::PI/2 * dist / (radius*1.5)) / (consts::PI * dist / (radius*1.5)) * 1e5 : 10;
-                temp = dist < radius ? std::sin(consts::PI/2 * dist / radius) / (consts::PI * dist / radius) * Tc : 0;
-                // temp = 1e6;
+            // maxV = 0;
+            // for (int i = 0; i < leafCells.size(); i++) {
+            //     FluidCell *cell = leafCells[i];
+            //     // mass = (std::rand() % 100) * 1e16;
+            //     xyPos xy = getXY(cell->depth,cell->index);
+            //     double radius = pow(width*height,0.5)/4;
+            //     double dist = pow(pow(width/2-5e8-xy.x,2) + pow(height/2-3e8-xy.y,2),0.5);
+            //     double Tc = 2e6;
+            //     // double Tc = 1e8;
+            //     long double mc = 3e21;
+            //     // mass = dist < radius ? pow(1-dist/radius,3)*1e24/numCells : 1e18/numCells;
+            //     mass = dist <= radius ? std::sin(consts::PI/2 * dist/radius)/(consts::PI *dist/radius) * mc/numCells : 1e15/numCells;
+			// 		//1e-8*cell->getSize();
+            //     // temp = dist < radius ? pow(1-dist/radius,3)*1e6 : 10;
+            //     // temp = dist < radius ? std::cos(consts::PI/2 * dist / (radius*1.5)) / (consts::PI * dist / (radius*1.5)) * 1e5 : 10;
+            //     temp = dist <= radius ? std::sin(consts::PI/2 * dist / radius) / (consts::PI * dist / radius) * Tc : 10;
+            //     // temp = 1e6;
 
-                VelocityVector vel;
-                double xDist = xy.x - width/2;
-                double yDist = xy.y - height/2;
-                float angle = xDist > 0 ? std::atan(yDist/xDist) + consts::PI/2 : consts::PI+std::atan(yDist/xDist) + consts::PI/2;
-                double velMag = std::sqrt(2*consts::G*1e27/dist);
-                double vx = velMag*std::cos(angle);
-                double vy = velMag*std::sin(angle);
-                vel.setVx(vx);
-                vel.setVy(vy);
+            //     VelocityVector vel;
+            //     double xDist = xy.x -5e8 - width/2;
+            //     double yDist = xy.y -3e8 - height/2;
+            //     float angle = xDist > 0 ? std::atan(yDist/xDist) + consts::PI/2 : consts::PI+std::atan(yDist/xDist) + consts::PI/2;
+            //     double velMag = std::sqrt(2*consts::G*1e27/dist);
+            //     double vx = velMag*std::cos(angle);
+            //     double vy = velMag*std::sin(angle);
+            //     vel.setVx(vx);
+            //     vel.setVy(vy);
 
-                if (dist > radius || dist == 0) {
-                    if (dist == 0) {
-                        mass = mc/numCells;
-                        temp = Tc;
-                    }
-                    vel = VelocityVector(0,0);
-                }
+            //     if (dist > radius || dist == 0) {
+            //         if (dist == 0) {
+            //             mass = mc/numCells;
+            //             temp = Tc;
+            //         }
+            //         vel = VelocityVector(0,0);
+            //     }
 
-                cell->setVelocity(vel);
-                // if (dist/radius < 1 && vy < 0) std::cout << " dist,vx,vy " << dist/radius << "," << cell->getVelocity().getVx() << "," << cell->getVelocity().getVy();
-                cell->setMass(mass);
-                cell->setTemp(temp);
-                cell->gete(true);
-                cell->setE(cell->gete(false));
-                cell->getPressure(true);
-                if (abs(cell->getVelocity().getVx()) > maxV) maxV = abs(cell->getVelocity().getVx());
-                else if (abs(cell->getVelocity().getVy()) > maxV) maxV = abs(cell->getVelocity().getVy());
-            }
+            //     cell->setVelocity(vel);
+            //     // if (dist/radius < 1 && vy < 0) std::cout << " dist,vx,vy " << dist/radius << "," << cell->getVelocity().getVx() << "," << cell->getVelocity().getVy();
+            //     cell->setMass(mass);
+            //     cell->setTemp(temp);
+            //     cell->gete(true);
+            //     cell->setE(cell->gete(false));
+            //     cell->getPressure(true);
+            //     if (abs(cell->getVelocity().getVx()) > maxV) maxV = abs(cell->getVelocity().getVx());
+            //     else if (abs(cell->getVelocity().getVy()) > maxV) maxV = abs(cell->getVelocity().getVy());
+            // }
             
             minSize = std::min(width,height) / pow(pow(4,startDepth),0.5);
             // if (maxV == 0) {
@@ -1008,10 +1203,15 @@ class FluidGrid {
                 double gradPy = (pressT - pressB)/(distT+distB);
                 double gradPx = (pressR - pressL)/(distL+distR);
                 VelocityVector v = cell->getVelocity();
-                if (cell->getDensity() > 1e-6) {
+                if (cell->getDensity() > 0) {
                     VelocityVector diff = velDiffusion(cell);
-                    double newVx = v.getVx() + (-gradUx-gradPx/cell->getDensity() + diff.getVx()/cell->getDensity())*getdt();
-                    double newVy = v.getVy() + (-gradUy-gradPy/cell->getDensity() + diff.getVy()/cell->getDensity())*getdt();
+					double avgXDens = (cellL->getDensity() + cell->getDensity() + cellR->getDensity())/3;
+					double avgYDens = (cellT->getDensity() + cell->getDensity() + cellB->getDensity())/3;
+					cell->pressGrad((abs(gradPx)/avgXDens + abs(gradPy)/avgYDens)/2);
+					//double newVx = v.getVx() + (-gradUx-gradPx/cell->getDensity() + diff.getVx()/cell->getDensity())*getdt();
+                    //double newVy = v.getVy() + (-gradUy-gradPy/cell->getDensity() + diff.getVy()/cell->getDensity())*getdt();
+					double newVx = v.getVx() + (-gradUx-gradPx/avgXDens + diff.getVx()/cell->getDensity())*getdt();
+                    double newVy = v.getVy() + (-gradUy-gradPy/avgYDens + diff.getVy()/cell->getDensity())*getdt();
                     xyPos pos = getXY(cell->depth, cell->index);
 
                     double scaleX, scaleY;
@@ -1029,8 +1229,8 @@ class FluidGrid {
 
                     if (!std::isfinite(newVx+newVy)) {
                         // std::cout << "vx vy: " << v.getVx() << " " << v.getVy() << std::endl;
-                        newVx = 0;
-                        newVy = 0;
+                        newVx = v.getVx();
+                        newVy = v.getVy();
                     }
 
                     // newV.setVx(v.getVx() + (-gradUx-gradPx/cell->getDensity())*getdt());
@@ -1038,8 +1238,22 @@ class FluidGrid {
                     // newV.setVy(v.getVy() + (-gradUy-gradPy/cell->getDensity())*getdt());
                     newV.setVy(newVy*scaleY);
                 } else {
-                    newV.setVx(0);
-                    newV.setVy(0);
+					// get average of surroundings
+					double Rvx = cellR != cell ? cellR->getVelocity().getVx() : 0;
+					double Lvx = cellL != cell ? cellL->getVelocity().getVx() : 0;
+					double Tvx = cellT != cell ? cellT->getVelocity().getVx() : 0;
+					double Bvx = cellB != cell ? cellB->getVelocity().getVx() : 0;
+					double newVx = (Rvx + Lvx + Tvx + Bvx)/4;
+					double Rvy = cellR != cell ? cellR->getVelocity().getVy() : 0;
+					double Lvy = cellL != cell ? cellL->getVelocity().getVy() : 0;
+					double Tvy = cellT != cell ? cellT->getVelocity().getVy() : 0;
+					double Bvy = cellB != cell ? cellB->getVelocity().getVy() : 0;
+					double newVy = (Rvy + Lvy + Tvy + Bvy)/4;
+
+					// double newVx = (cellR->getVelocity().getVx() + cellL->getVelocity().getVx() + cellT->getVelocity().getVx() + cellB->getVelocity().getVx())/4;
+					// double newVy = (cellR->getVelocity().getVy() + cellL->getVelocity().getVy() + cellT->getVelocity().getVy() + cellB->getVelocity().getVy())/4;
+                    newV.setVx(newVx);
+                    newV.setVy(newVy);
                 }
 
                 // if (cell->getDensity() < 1e-3) {
@@ -5274,16 +5488,16 @@ class FluidGrid {
             // std::cout << maxFracTraveled << ", " << avgFracTraveled << ", " << maxV << std::endl;
             // tote = 0;
             for (int i = 0; i < leafCells.size(); i++) {
-                // tote += leafCells[i]->getE(false)*leafCells[i]->getSize();
-                // if (T < 1000) {
-                // setAMR(leafCells[i]);
-                // }
+                tote += leafCells[i]->getE(false)*leafCells[i]->getSize();
+                //if (T < 1000) {
+                //setAMR(leafCells[i]);
+                //}
             }
             // std::cout << "\r" << tote << std::endl;
             auto setamr = std::chrono::steady_clock::now();
-            // checkAMR();
+            checkAMR();
             auto amr = std::chrono::steady_clock::now();
-            // updateLeafCells();
+            updateLeafCells();
             auto leaf = std::chrono::steady_clock::now();
 
             // if (maxFracTraveled > 1) {
@@ -5322,15 +5536,15 @@ class FluidGrid {
         
 
     private:
-        int maxDepth = 7;
+        int maxDepth = 8;
         int minDepth = 3;
         // gradient thresh
-        float coarseThresh = 0.1; 
-        float refineThresh = 0.2;
+        float coarseThresh = 0.001; 
+        float refineThresh = 0.1;
         // density threshold
-        float densCoarseThresh = 0.01;
+        float densCoarseThresh = 0.0001;
         float densRefineThresh = 0.5;
-        float viscosity = 0.7;
+        float viscosity = 0.1;
         double width, height;
         double maxV;
         double minSize; // minimum side length
@@ -5376,6 +5590,7 @@ class Simulator {
             double thisMinGP = 0;
             double thisMaxe = 0;
             double thisMaxFusion = 0;
+			double thisMaxPG = 0;
             SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255); 
             SDL_RenderClear(renderer);
             std::vector<FluidCell *> leaves = grid->getLeafCells();
@@ -5411,6 +5626,7 @@ class Simulator {
                 if (gravPotential < thisMinGP) thisMinGP = gravPotential;
                 if (e > thisMaxe) thisMaxe = e;
                 if (fusion > thisMaxFusion) thisMaxFusion = fusion;
+				if (cell->PG > thisMaxPG) thisMaxPG = cell->PG;
 
                 double maxBit = 255.0;
                 double zero = 0;
@@ -5454,6 +5670,7 @@ class Simulator {
                     SDL_SetRenderDrawColor(renderer, 0, scaled_fusion, scaled_fusion, 255);
                 } else if (degenerateDisplay) {
                     double deg = degenerate*255;
+					deg = std::max(zero,std::min(maxBit,(double) cell->PG/maxPG * 255));
                     SDL_SetRenderDrawColor(renderer, 0, 0, deg, 255);
                 }
                 
@@ -5488,7 +5705,7 @@ class Simulator {
                 }
             }
 
-            if (mouseValueDisplay) {
+            /*if (mouseValueDisplay) {
                 // Initialize SDL_ttf library
                 if (TTF_Init() != 0)
                 {
@@ -5549,9 +5766,9 @@ class Simulator {
 
                 SDL_RenderCopy(renderer, Message, NULL, &Message_rect);
                 // SDL_blit(screenSurface);
-            }
+				}*/
 
-
+			maxPG = thisMaxPG;
             maxPressure = thisMaxPressure;
             maxDensity = thisMaxDensity;
             minDensity = thisMinDensity;
@@ -5768,6 +5985,7 @@ class Simulator {
         double minGP = 0;
         double maxe = 0;
         double maxFusion = 0;
+	    double maxPG = 0;
         uint pressureDisplay = 0; 
         uint temperatureDisplay = 0;
         uint densityDisplay = 1;
@@ -5779,7 +5997,7 @@ class Simulator {
         uint fusionDisplay = 0;
         uint degenerateDisplay = 0;
         uint gridDisplay = 0;
-        uint velocityDisplay = 1;
+        uint velocityDisplay = 0;
         uint mouseValueDisplay = 0;
 };
 
@@ -5794,7 +6012,7 @@ void printBinaryRecursive(uint64_t num) {
 int main(int argv, char **argc) {
     if (argv > 4) std::srand((unsigned) atoi(argc[4]));
     else std::srand((unsigned) std::time(NULL));
-    Simulator sim(1e10,1e10,atoi(argc[1]), atoi(argc[2]), atoi(argc[3]), "outputGrid_1e8.txt");
+    Simulator sim(1e9,1e9,atoi(argc[1]), atoi(argc[2]), atoi(argc[3]), "outputGrid_1e8.txt");
     // Simulator sim(10,10,atoi(argc[1]));
 
     // for (const auto& pair : sim.grid->getIDMap()) {

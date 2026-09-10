@@ -1,7 +1,7 @@
 #include <cmath>
 #include <iostream>
 #include <SDL2/SDL.h>
-#include <SDL2/SDL_ttf.h>
+//#include <SDL2/SDL_ttf.h>
 // #include <SDL.h>
 #include <cstdlib>
 #include <vector>
@@ -20,7 +20,7 @@ namespace consts {
     const double mH = 1.67e-27;
     const double sig_sb = 5.6704e-8;
     const double a = 4*sig_sb/c;
-    
+	
     const double HCv = 10730;
 
     const double g = -9.8;
@@ -203,12 +203,12 @@ double fusionRateHe(double rho, double T, double Y) {
 }
 
 double opacity(double rho, double T, float X) {
-    return 0.02 * (1.0 + X) + 4.34e21 * rho * pow(T, -3.5);
+    return 0.034;
+		//* (1.0 + X) + 4.34e21 * rho * pow(T, -3.5);
 }
 
 float opticalDepth(double kap, double rho, double width) {
-    return kap*rho;
-    // *width;
+    return kap*rho*width;
 }
 
 struct Arrow {
@@ -248,6 +248,7 @@ class VelocityVector;
 class FluidCell;
 class Source;
 class FluidGrid;
+class Star;
 // class FluidGrid {
 //     public:
 //         FluidGrid(double width, double height, int r, int c, double dt, bool comp);
